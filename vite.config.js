@@ -6,5 +6,5 @@ import react from "@vitejs/plugin-react";
 // repo (a user/organization site), leave base as "/".
 export default defineConfig({
   plugins: [react()],
-  base: "/flashcard-pages/",
+  base: "/Flashcard/",
 });
