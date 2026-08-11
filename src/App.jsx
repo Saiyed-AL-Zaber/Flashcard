@@ -299,6 +299,7 @@ function Shell({ children, theme, dark, toggleDark, user, connected }) {
   return (
     <div style={{
       minHeight: "100vh",
+      overflowX: "hidden",
       width: "100%",
       background: theme.bgGradient,
       fontFamily: "'Inter', sans-serif",
@@ -675,7 +676,7 @@ function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards
         onBack={onBack} />
 
       <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 16, padding: 18, marginBottom: 24 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
           <div>
             <div style={{ fontSize: 12.5, color: theme.textDim, marginBottom: 6 }}>Term / Front</div>
             <textarea ref={frontRef} value={front} onChange={e => setFront(e.target.value)} rows={2} placeholder="e.g. Mitochondria"
@@ -746,55 +747,72 @@ function CardRow({ theme, card, onUpdate, onDelete }) {
     <div className="hoverlift" style={{
       background: isBlank ? theme.surfaceAlt : theme.surface,
       border: isBlank ? `1.5px dashed ${theme.borderStrong}` : `1px solid ${theme.border}`,
-      borderRadius: 12, padding: 12, display: "flex", gap: 12, alignItems: "flex-start"
+      borderRadius: 12, padding: 12, display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap"
     }}>
       <div style={{ width: 6, alignSelf: "stretch", borderRadius: 4, background: card.color, minHeight: 40, transition: "background-color .3s ease" }} />
       {editing ? (
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ flex: "1 1 220px", minWidth: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
           <input value={front} onChange={e => setFront(e.target.value)} placeholder="Term / front"
             onKeyDown={e => { if (e.key === "Enter") save(); }}
-            style={{ background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: "8px 10px", color: theme.text }} />
+            style={{ width: "100%", background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: "8px 10px", color: theme.text, boxSizing: "border-box" }} />
           <input value={back} onChange={e => setBack(e.target.value)} placeholder="Definition / back"
             onKeyDown={e => { if (e.key === "Enter") save(); }}
-            style={{ background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: "8px 10px", color: theme.text }} />
+            style={{ width: "100%", background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: "8px 10px", color: theme.text, boxSizing: "border-box" }} />
         </div>
       ) : (
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <div style={{ fontSize: 14 }}>{card.front}</div>
-          <div style={{ fontSize: 14, color: theme.textDim }}>{card.back}</div>
+        <div style={{ flex: "1 1 220px", minWidth: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+          <div style={{ fontSize: 14, wordBreak: "break-word" }}>{card.front}</div>
+          <div style={{ fontSize: 14, color: theme.textDim, wordBreak: "break-word" }}>{card.back}</div>
         </div>
       )}
-      <div style={{ display: "flex", gap: 4, flexShrink: 0, alignItems: "center" }}>
-        <div style={{ marginRight: 6 }}>
-          <ColorSwatchPickerMini value={card.color} onChange={(hex) => onUpdate({ color: hex })} />
-        </div>
+      <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center", marginLeft: "auto" }}>
+        <ColorDotPicker value={card.color} onChange={(hex) => onUpdate({ color: hex })} />
         {editing ? (
-          <button onClick={save} className="iconbtn" style={{ background: "none", border: "none", color: "#6fae6f" }}><Check size={16} /></button>
+          <button onClick={save} className="iconbtn" title="Save card"
+            style={{ background: theme.correctBg, border: `1px solid ${theme.correctBorder}`, borderRadius: 8, color: theme.correctText, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Check size={16} />
+          </button>
         ) : (
-          <button onClick={() => setEditing(true)} className="iconbtn" style={{ background: "none", border: "none", color: theme.textFaint }}><Edit2 size={14} /></button>
+          <button onClick={() => setEditing(true)} className="iconbtn" title="Edit card"
+            style={{ background: "none", border: `1px solid ${theme.border}`, borderRadius: 8, color: theme.textFaint, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Edit2 size={14} />
+          </button>
         )}
-        <button onClick={onDelete} className="iconbtn" style={{ background: "none", border: "none", color: theme.textFaint }}><Trash2 size={14} /></button>
+        <button onClick={onDelete} className="iconbtn" title="Delete card"
+          style={{ background: "none", border: `1px solid ${theme.border}`, borderRadius: 8, color: theme.textFaint, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Trash2 size={14} />
+        </button>
       </div>
     </div>
   );
 }
 
-function ColorSwatchPickerMini({ value, onChange }) {
-  const isPreset = CARD_COLORS.some(c => c.hex.toLowerCase() === (value || "").toLowerCase());
+function ColorDotPicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-      {CARD_COLORS.slice(0, 6).map(c => (
-        <button key={c.hex} onClick={() => onChange(c.hex)} title={c.name} className="iconbtn"
-          style={{ width: 16, height: 16, borderRadius: 5, background: c.hex, border: value === c.hex ? "1.5px solid #F6EFDE" : "1px solid transparent" }} />
-      ))}
-      <label title="Custom color" style={{
-        width: 16, height: 16, borderRadius: 5, cursor: "pointer", position: "relative", overflow: "hidden",
-        border: !isPreset ? "1.5px solid #F6EFDE" : "1px dashed #9c8f70",
-        background: !isPreset ? value : "conic-gradient(red,yellow,lime,cyan,blue,magenta,red)",
-      }}>
-        <input type="color" value={isPreset ? "#ffffff" : value} onChange={e => onChange(e.target.value)}
-          style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
-      </label>
+    <div style={{ position: "relative" }}>
+      <button onClick={() => setOpen(o => !o)} title="Card color" className="iconbtn"
+        style={{ width: 22, height: 22, borderRadius: "50%", background: value, border: "1.5px solid rgba(0,0,0,.2)" }} />
+      {open && (
+        <div className="scale-in" style={{
+          position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 20,
+          background: "#2b241c", border: "1px solid #443a2c", borderRadius: 12, padding: 10,
+          display: "flex", gap: 6, flexWrap: "wrap", width: 128, boxShadow: "0 10px 24px rgba(0,0,0,.3)"
+        }}>
+          {CARD_COLORS.map(c => (
+            <button key={c.hex} onClick={() => { onChange(c.hex); setOpen(false); }} title={c.name} className="iconbtn"
+              style={{ width: 22, height: 22, borderRadius: 6, background: c.hex, border: value === c.hex ? "2px solid #F6EFDE" : "2px solid transparent" }} />
+          ))}
+          <label title="Custom color" style={{
+            width: 22, height: 22, borderRadius: 6, cursor: "pointer", position: "relative", overflow: "hidden",
+            border: "1px dashed #9c8f70", background: "conic-gradient(red,yellow,lime,cyan,blue,magenta,red)",
+          }}>
+            <input type="color" value={value} onChange={e => { onChange(e.target.value); }}
+              style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
+          </label>
+        </div>
+      )}
+      {open && <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 10 }} />}
     </div>
   );
 }
