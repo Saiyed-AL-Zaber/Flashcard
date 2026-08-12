@@ -338,8 +338,8 @@ function Shell({ children, theme, dark, toggleDark, user, connected }) {
           position: relative; width: 100%; height: 100%;
           -webkit-transform-style: preserve-3d;
           transform-style: preserve-3d;
-          -webkit-transition: -webkit-transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-          transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+          -webkit-transition: -webkit-transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+          transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .card-flip-inner.flipped { -webkit-transform: rotateY(180deg); transform: rotateY(180deg); }
         .card-face {
