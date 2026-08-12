@@ -3,7 +3,7 @@ import {
   Folder, Plus, Play, Shuffle, ArrowLeft, Check, X, Edit2, Trash2,
   ChevronLeft, ChevronRight, RotateCw, BookOpen, ListChecks, PenLine,
   Settings2, FolderPlus, Layers, RefreshCw, Award, ArrowRight, Palette,
-  Sun, Moon, LogOut, Cloud, CloudOff
+  Sun, Moon, LogOut, Cloud, CloudOff, ThumbsUp, ThumbsDown
 } from "lucide-react";
 import { supabase } from "./supabase";
 
@@ -316,7 +316,7 @@ function Shell({ children, theme, dark, toggleDark, user, connected }) {
         input, select, textarea, button { font-family: inherit; }
         button { cursor: pointer; }
 
-        .card-flip-wrap { perspective: 1600px; position: relative; -webkit-tap-highlight-color: transparent; touch-action: manipulation; outline: none; }
+        .card-flip-wrap { perspective: 1600px; -webkit-perspective: 1600px; position: relative; -webkit-tap-highlight-color: transparent; touch-action: manipulation; outline: none; }
         .card-flip-wrap:focus-visible { box-shadow: 0 0 0 3px ${ACCENT}88; border-radius: 18px; }
         .tap-flash { position: absolute; inset: 0; border-radius: 18px; pointer-events: none;
           background: radial-gradient(circle, rgba(255,255,255,.55), transparent 70%);
@@ -324,17 +324,20 @@ function Shell({ children, theme, dark, toggleDark, user, connected }) {
         .tap-flash.show { opacity: .9; transition: opacity 0s; }
         .card-flip-inner {
           position: relative; width: 100%; height: 100%;
+          -webkit-transform-style: preserve-3d;
           transform-style: preserve-3d;
+          -webkit-transition: -webkit-transform 0.65s cubic-bezier(0.65, 0, 0.35, 1);
           transition: transform 0.65s cubic-bezier(0.65, 0, 0.35, 1);
         }
-        .flipped .card-flip-inner { transform: rotateY(180deg); }
+        .flipped .card-flip-inner { -webkit-transform: rotateY(180deg); transform: rotateY(180deg); }
         .card-face {
-          position: absolute; inset: 0; backface-visibility: hidden;
+          position: absolute; inset: 0;
+          -webkit-backface-visibility: hidden; backface-visibility: hidden;
           border-radius: 18px; display: flex; align-items: center; justify-content: center;
           padding: 28px; text-align: center;
           transition: background-color .4s ease, color .4s ease, box-shadow .4s ease;
         }
-        .card-back-face { transform: rotateY(180deg); }
+        .card-back-face { -webkit-transform: rotateY(180deg); transform: rotateY(180deg); }
 
         .scale-in { animation: scaleIn .3s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes scaleIn { from { opacity: 0; transform: scale(.96) translateY(4px); } to { opacity: 1; transform: scale(1) translateY(0);} }
@@ -843,12 +846,16 @@ function StudyMode({ theme, set, onBack }) {
   const [flipped, setFlipped] = useState(false);
   const [flash, setFlash] = useState(false);
   const [orientation, setOrientation] = useState("front"); // "front" | "back"
+  const [marks, setMarks] = useState({}); // cardId -> "known" | "unknown"
+  const [phase, setPhase] = useState("study"); // "study" | "summary"
 
   useEffect(() => {
     const base = sortCards(set.cards, sortBy).map(c => c.id);
     setOrder(shuffled ? shuffleArr(base) : base);
     setIndex(0);
     setFlipped(false);
+    setMarks({});
+    setPhase("study");
   }, [sortBy]); // eslint-disable-line
 
   const reshuffle = () => {
@@ -856,12 +863,16 @@ function StudyMode({ theme, set, onBack }) {
     setOrder(shuffleArr(order));
     setIndex(0);
     setFlipped(false);
+    setMarks({});
+    setPhase("study");
   };
   const unshuffle = () => {
     setShuffled(false);
     setOrder(sortCards(set.cards, sortBy).map(c => c.id));
     setIndex(0);
     setFlipped(false);
+    setMarks({});
+    setPhase("study");
   };
 
   const cardsById = useMemo(() => Object.fromEntries(set.cards.map(c => [c.id, c])), [set.cards]);
@@ -878,6 +889,78 @@ function StudyMode({ theme, set, onBack }) {
     setTimeout(() => setIndex(i => Math.max(0, Math.min(order.length - 1, i + dir))), 140);
   };
 
+  const mark = (status) => {
+    if (!current) return;
+    setMarks(m => ({ ...m, [current.id]: status }));
+    setFlipped(false);
+    setTimeout(() => {
+      if (index + 1 >= order.length) setPhase("summary");
+      else setIndex(i => i + 1);
+    }, 160);
+  };
+
+  const knownCount = Object.values(marks).filter(v => v === "known").length;
+  const unknownIds = Object.entries(marks).filter(([, v]) => v === "unknown").map(([id]) => id);
+
+  const reviewMissed = () => {
+    setOrder(unknownIds);
+    setIndex(0);
+    setFlipped(false);
+    setMarks({});
+    setPhase("study");
+  };
+  const restudyAll = () => {
+    const base = sortCards(set.cards, sortBy).map(c => c.id);
+    setOrder(shuffled ? shuffleArr(base) : base);
+    setIndex(0);
+    setFlipped(false);
+    setMarks({});
+    setPhase("study");
+  };
+
+  if (phase === "summary") {
+    const missedCards = unknownIds.map(id => cardsById[id]).filter(Boolean);
+    return (
+      <div>
+        <TopBar theme={theme} title={set.name} subtitle="Session complete" onBack={onBack} />
+        <div className="scale-in" style={{
+          textAlign: "center", padding: "30px 20px", borderRadius: 18, marginBottom: 22,
+          background: theme.surface, border: `1px solid ${theme.border}`
+        }}>
+          <Award size={32} color={ACCENT} style={{ marginBottom: 8 }} />
+          <div className="disp" style={{ fontSize: 17, fontWeight: 700 }}>
+            {knownCount} known · {unknownIds.length} to review
+          </div>
+        </div>
+
+        {missedCards.length > 0 ? (
+          <div style={{ marginBottom: 22 }}>
+            <div className="disp" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Still learning</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {missedCards.map(c => (
+                <div key={c.id} style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12, padding: 12, display: "flex", gap: 10, alignItems: "center" }}>
+                  <div style={{ width: 6, alignSelf: "stretch", borderRadius: 4, background: c.color, minHeight: 20 }} />
+                  <div style={{ flex: 1, fontSize: 13.5 }}>{c.front}</div>
+                  <div style={{ flex: 1, fontSize: 13.5, color: theme.textDim }}>{c.back}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <EmptyState theme={theme} icon={Award} title="You knew every card!" sub="Nice work — restudy anytime to keep it fresh." action={null} />
+        )}
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {missedCards.length > 0 && (
+            <Btn theme={theme} color={set.color} onClick={reviewMissed}><RefreshCw size={15} /> Review missed cards</Btn>
+          )}
+          <Btn theme={theme} variant="ghost" onClick={restudyAll}><RotateCw size={15} /> Restudy all</Btn>
+          <Btn theme={theme} variant="ghost" onClick={onBack}>Done</Btn>
+        </div>
+      </div>
+    );
+  }
+
   if (!current) return null;
 
   const frontFirst = orientation === "front";
@@ -886,7 +969,7 @@ function StudyMode({ theme, set, onBack }) {
 
   return (
     <div>
-      <TopBar theme={theme} title={set.name} subtitle={`Studying · card ${index + 1} of ${order.length}`} onBack={onBack} />
+      <TopBar theme={theme} title={set.name} subtitle={`Studying · card ${index + 1} of ${order.length} · ${knownCount} known · ${unknownIds.length} to review`} onBack={onBack} />
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 20, alignItems: "center" }}>
         <select value={sortBy} onChange={e => setSortBy(e.target.value)}
@@ -941,6 +1024,15 @@ function StudyMode({ theme, set, onBack }) {
         <div className={"tap-flash" + (flash ? " show" : "")} />
       </div>
       <div style={{ textAlign: "center", fontSize: 12.5, color: theme.textFaint, marginTop: -14, marginBottom: 18 }}>tap card to flip</div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
+        <Btn theme={theme} onClick={() => mark("unknown")} style={{ background: theme.wrongBg, color: theme.wrongText, border: `1px solid ${theme.wrongBorder}` }}>
+          <ThumbsDown size={16} /> Still learning
+        </Btn>
+        <Btn theme={theme} onClick={() => mark("known")} style={{ background: theme.correctBg, color: theme.correctText, border: `1px solid ${theme.correctBorder}` }}>
+          <ThumbsUp size={16} /> I knew it
+        </Btn>
+      </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16 }}>
         <button onClick={() => go(-1)} disabled={index === 0} className="iconbtn" style={{
