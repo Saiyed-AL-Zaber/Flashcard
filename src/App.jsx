@@ -3,7 +3,7 @@ import {
   Folder, Plus, Play, Shuffle, ArrowLeft, Check, X, Edit2, Trash2,
   ChevronLeft, ChevronRight, RotateCw, BookOpen, ListChecks, PenLine,
   Settings2, FolderPlus, Layers, RefreshCw, Award, ArrowRight, Palette,
-  Sun, Moon, LogOut, Cloud, CloudOff, ThumbsUp, ThumbsDown
+  Sun, Moon, LogOut, Cloud, CloudOff
 } from "lucide-react";
 import { supabase } from "./supabase";
 
@@ -911,9 +911,11 @@ function StudyMode({ theme, set, onBack }) {
     }, 160);
   };
 
-  // --- swipe gesture ---
+  // --- swipe gesture (all decision state lives in refs, not React state,
+  // so a fast tap can never race against a pending re-render) ---
   const [dragX, setDragX] = useState(0);
-  const [dragging, setDragging] = useState(false);
+  const [transitionOn, setTransitionOn] = useState(false);
+  const pointerActive = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const dragMoved = useRef(false);
   const activePointerId = useRef(null);
@@ -921,13 +923,14 @@ function StudyMode({ theme, set, onBack }) {
 
   const onCardPointerDown = (e) => {
     if (phase !== "study") return;
+    pointerActive.current = true;
     activePointerId.current = e.pointerId;
     dragStart.current = { x: e.clientX, y: e.clientY };
     dragMoved.current = false;
-    setDragging(true);
+    setTransitionOn(false);
   };
   const onCardPointerMove = (e) => {
-    if (!dragging || e.pointerId !== activePointerId.current) return;
+    if (!pointerActive.current || e.pointerId !== activePointerId.current) return;
     const dx = e.clientX - dragStart.current.x;
     const dy = e.clientY - dragStart.current.y;
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 6) {
@@ -936,19 +939,20 @@ function StudyMode({ theme, set, onBack }) {
     }
   };
   const settleDrag = () => {
-    setDragging(true); // momentarily kill transition so the reset is instant
+    setTransitionOn(false); // instant reset, no transition
     setDragX(0);
-    requestAnimationFrame(() => requestAnimationFrame(() => setDragging(false)));
+    requestAnimationFrame(() => requestAnimationFrame(() => setTransitionOn(true)));
   };
   const finishSwipe = (status) => {
-    setDragging(false);
+    setTransitionOn(true);
     setDragX(status === "known" ? 640 : -640);
     setTimeout(() => { mark(status); settleDrag(); }, 220);
   };
   const onCardPointerUp = (e) => {
-    if (!dragging || e.pointerId !== activePointerId.current) return;
-    const dx = dragX;
-    setDragging(false);
+    if (!pointerActive.current || e.pointerId !== activePointerId.current) return;
+    pointerActive.current = false;
+    const dx = dragMoved.current ? (e.clientX - dragStart.current.x) : 0;
+    setTransitionOn(true);
     if (dx > SWIPE_THRESHOLD) finishSwipe("known");
     else if (dx < -SWIPE_THRESHOLD) finishSwipe("unknown");
     else {
@@ -956,7 +960,7 @@ function StudyMode({ theme, set, onBack }) {
       if (!dragMoved.current) doFlip();
     }
   };
-  const onCardPointerCancel = () => { setDragging(false); setDragX(0); };
+  const onCardPointerCancel = () => { pointerActive.current = false; setTransitionOn(true); setDragX(0); };
 
   const knowOpacity = Math.max(0, Math.min(1, dragX / SWIPE_THRESHOLD));
   const learnOpacity = Math.max(0, Math.min(1, -dragX / SWIPE_THRESHOLD));
@@ -1061,7 +1065,7 @@ function StudyMode({ theme, set, onBack }) {
         style={{
           height: 320, marginBottom: 22,
           transform: `translateX(${dragX}px) rotate(${dragX / 22}deg)`,
-          transition: dragging ? "none" : "transform .32s cubic-bezier(0.16,1,0.3,1)",
+          transition: transitionOn ? "transform .32s cubic-bezier(0.16,1,0.3,1)" : "none",
         }}
         onPointerDown={onCardPointerDown}
         onPointerMove={onCardPointerMove}
@@ -1097,15 +1101,6 @@ function StudyMode({ theme, set, onBack }) {
         </div>
       </div>
       <div style={{ textAlign: "center", fontSize: 12.5, color: theme.textFaint, marginTop: -14, marginBottom: 18 }}>tap to flip · swipe right if you knew it, left if you're still learning</div>
-
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
-        <Btn theme={theme} onClick={() => mark("unknown")} style={{ background: theme.wrongBg, color: theme.wrongText, border: `1px solid ${theme.wrongBorder}` }}>
-          <ThumbsDown size={16} /> Still learning
-        </Btn>
-        <Btn theme={theme} onClick={() => mark("known")} style={{ background: theme.correctBg, color: theme.correctText, border: `1px solid ${theme.correctBorder}` }}>
-          <ThumbsUp size={16} /> I knew it
-        </Btn>
-      </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16 }}>
         <button onClick={() => go(-1)} disabled={index === 0} className="iconbtn" style={{
