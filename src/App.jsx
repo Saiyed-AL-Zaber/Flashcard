@@ -316,8 +316,20 @@ function Shell({ children, theme, dark, toggleDark, user, connected }) {
         input, select, textarea, button { font-family: inherit; }
         button { cursor: pointer; }
 
-        .card-flip-wrap { perspective: 1600px; -webkit-perspective: 1600px; position: relative; -webkit-tap-highlight-color: transparent; touch-action: manipulation; outline: none; }
-        .card-flip-wrap:focus-visible { box-shadow: 0 0 0 3px ${ACCENT}88; border-radius: 18px; }
+        .card-flip-wrap { perspective: 1600px; -webkit-perspective: 1600px; position: relative; }
+        .swipe-layer {
+          position: relative; touch-action: pan-y; cursor: grab; outline: none;
+          -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none;
+        }
+        .swipe-layer:active { cursor: grabbing; }
+        .swipe-layer:focus-visible { box-shadow: 0 0 0 3px ${ACCENT}88; border-radius: 18px; }
+        .swipe-stamp {
+          position: absolute; top: 16px; z-index: 5; padding: 6px 14px; border-radius: 8px;
+          font-weight: 800; font-size: 12.5px; letter-spacing: .05em; text-transform: uppercase;
+          border: 2.5px solid; pointer-events: none;
+        }
+        .swipe-stamp-know { right: 16px; color: #2F5A1D; border-color: #2F5A1D; background: rgba(228,243,218,.92); transform: rotate(8deg); }
+        .swipe-stamp-learn { left: 16px; color: #7A2020; border-color: #7A2020; background: rgba(251,228,228,.92); transform: rotate(-8deg); }
         .tap-flash { position: absolute; inset: 0; border-radius: 18px; pointer-events: none;
           background: radial-gradient(circle, rgba(255,255,255,.55), transparent 70%);
           opacity: 0; transition: opacity .45s ease-out; }
@@ -899,6 +911,56 @@ function StudyMode({ theme, set, onBack }) {
     }, 160);
   };
 
+  // --- swipe gesture ---
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const dragMoved = useRef(false);
+  const activePointerId = useRef(null);
+  const SWIPE_THRESHOLD = 90;
+
+  const onCardPointerDown = (e) => {
+    if (phase !== "study") return;
+    activePointerId.current = e.pointerId;
+    dragStart.current = { x: e.clientX, y: e.clientY };
+    dragMoved.current = false;
+    setDragging(true);
+  };
+  const onCardPointerMove = (e) => {
+    if (!dragging || e.pointerId !== activePointerId.current) return;
+    const dx = e.clientX - dragStart.current.x;
+    const dy = e.clientY - dragStart.current.y;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 6) {
+      dragMoved.current = true;
+      setDragX(dx);
+    }
+  };
+  const settleDrag = () => {
+    setDragging(true); // momentarily kill transition so the reset is instant
+    setDragX(0);
+    requestAnimationFrame(() => requestAnimationFrame(() => setDragging(false)));
+  };
+  const finishSwipe = (status) => {
+    setDragging(false);
+    setDragX(status === "known" ? 640 : -640);
+    setTimeout(() => { mark(status); settleDrag(); }, 220);
+  };
+  const onCardPointerUp = (e) => {
+    if (!dragging || e.pointerId !== activePointerId.current) return;
+    const dx = dragX;
+    setDragging(false);
+    if (dx > SWIPE_THRESHOLD) finishSwipe("known");
+    else if (dx < -SWIPE_THRESHOLD) finishSwipe("unknown");
+    else {
+      setDragX(0);
+      if (!dragMoved.current) doFlip();
+    }
+  };
+  const onCardPointerCancel = () => { setDragging(false); setDragX(0); };
+
+  const knowOpacity = Math.max(0, Math.min(1, dragX / SWIPE_THRESHOLD));
+  const learnOpacity = Math.max(0, Math.min(1, -dragX / SWIPE_THRESHOLD));
+
   const knownCount = Object.values(marks).filter(v => v === "known").length;
   const unknownIds = Object.entries(marks).filter(([, v]) => v === "unknown").map(([id]) => id);
 
@@ -994,36 +1056,47 @@ function StudyMode({ theme, set, onBack }) {
         </div>
       </div>
 
-      <div className="card-flip-wrap" role="button" tabIndex={0}
-        aria-label="Flip card"
-        style={{ height: 320, marginBottom: 22 }}
-        onClick={doFlip}
+      <div className="swipe-layer" role="button" tabIndex={0}
+        aria-label="Flip card, or swipe right if you knew it, left if still learning"
+        style={{
+          height: 320, marginBottom: 22,
+          transform: `translateX(${dragX}px) rotate(${dragX / 22}deg)`,
+          transition: dragging ? "none" : "transform .32s cubic-bezier(0.16,1,0.3,1)",
+        }}
+        onPointerDown={onCardPointerDown}
+        onPointerMove={onCardPointerMove}
+        onPointerUp={onCardPointerUp}
+        onPointerCancel={onCardPointerCancel}
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); doFlip(); } }}>
-        <div className={flipped ? "card-flip-inner flipped" : "card-flip-inner"} style={{ height: "100%", cursor: "pointer" }}>
-          <div className="card-face" style={{
-            background: current.color, color: isLight(current.color) ? "#201a15" : "#F6EFDE",
-            border: "1px solid rgba(0,0,0,.15)", boxShadow: theme.shadow
-          }}>
-            <div className="punch" style={{ left: "50%", transform: "translateX(-50%)" }} />
-            <div>
-              <div className="hand" style={{ fontSize: 15, opacity: 0.65, marginBottom: 10 }}>{frontFirst ? "Term" : "Definition"}</div>
-              <div className="disp" style={{ fontSize: "clamp(20px, 3.4vw, 28px)", fontWeight: 600, lineHeight: 1.3 }}>{faceA}</div>
+        <div className="swipe-stamp swipe-stamp-know" style={{ opacity: knowOpacity }}>Know it</div>
+        <div className="swipe-stamp swipe-stamp-learn" style={{ opacity: learnOpacity }}>Learning</div>
+        <div className="card-flip-wrap" style={{ height: "100%" }}>
+          <div className={flipped ? "card-flip-inner flipped" : "card-flip-inner"} style={{ height: "100%", cursor: "pointer" }}>
+            <div className="card-face" style={{
+              background: current.color, color: isLight(current.color) ? "#201a15" : "#F6EFDE",
+              border: "1px solid rgba(0,0,0,.15)", boxShadow: theme.shadow
+            }}>
+              <div className="punch" style={{ left: "50%", transform: "translateX(-50%)" }} />
+              <div>
+                <div className="hand" style={{ fontSize: 15, opacity: 0.65, marginBottom: 10 }}>{frontFirst ? "Term" : "Definition"}</div>
+                <div className="disp" style={{ fontSize: "clamp(20px, 3.4vw, 28px)", fontWeight: 600, lineHeight: 1.3 }}>{faceA}</div>
+              </div>
+            </div>
+            <div className="card-face card-back-face" style={{
+              background: current.color, color: isLight(current.color) ? "#201a15" : "#F6EFDE",
+              border: "1px solid rgba(0,0,0,.15)", boxShadow: theme.shadow
+            }}>
+              <div className="punch" style={{ left: "50%", transform: "translateX(-50%)" }} />
+              <div>
+                <div className="hand" style={{ fontSize: 15, opacity: 0.65, marginBottom: 10 }}>{frontFirst ? "Definition" : "Term"}</div>
+                <div className="disp" style={{ fontSize: "clamp(20px, 3.4vw, 28px)", fontWeight: 600, lineHeight: 1.3 }}>{faceB}</div>
+              </div>
             </div>
           </div>
-          <div className="card-face card-back-face" style={{
-            background: current.color, color: isLight(current.color) ? "#201a15" : "#F6EFDE",
-            border: "1px solid rgba(0,0,0,.15)", boxShadow: theme.shadow
-          }}>
-            <div className="punch" style={{ left: "50%", transform: "translateX(-50%)" }} />
-            <div>
-              <div className="hand" style={{ fontSize: 15, opacity: 0.65, marginBottom: 10 }}>{frontFirst ? "Definition" : "Term"}</div>
-              <div className="disp" style={{ fontSize: "clamp(20px, 3.4vw, 28px)", fontWeight: 600, lineHeight: 1.3 }}>{faceB}</div>
-            </div>
-          </div>
+          <div className={"tap-flash" + (flash ? " show" : "")} />
         </div>
-        <div className={"tap-flash" + (flash ? " show" : "")} />
       </div>
-      <div style={{ textAlign: "center", fontSize: 12.5, color: theme.textFaint, marginTop: -14, marginBottom: 18 }}>tap card to flip</div>
+      <div style={{ textAlign: "center", fontSize: 12.5, color: theme.textFaint, marginTop: -14, marginBottom: 18 }}>tap to flip · swipe right if you knew it, left if you're still learning</div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
         <Btn theme={theme} onClick={() => mark("unknown")} style={{ background: theme.wrongBg, color: theme.wrongText, border: `1px solid ${theme.wrongBorder}` }}>
