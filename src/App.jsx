@@ -341,7 +341,7 @@ function Shell({ children, theme, dark, toggleDark, user, connected }) {
           -webkit-transition: -webkit-transform 0.65s cubic-bezier(0.65, 0, 0.35, 1);
           transition: transform 0.65s cubic-bezier(0.65, 0, 0.35, 1);
         }
-        .flipped .card-flip-inner { -webkit-transform: rotateY(180deg); transform: rotateY(180deg); }
+        .card-flip-inner.flipped { -webkit-transform: rotateY(180deg); transform: rotateY(180deg); }
         .card-face {
           position: absolute; inset: 0;
           -webkit-backface-visibility: hidden; backface-visibility: hidden;
