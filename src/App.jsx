@@ -316,7 +316,12 @@ function Shell({ children, theme, dark, toggleDark, user, connected }) {
         input, select, textarea, button { font-family: inherit; }
         button { cursor: pointer; }
 
-        .card-flip-wrap { perspective: 1600px; }
+        .card-flip-wrap { perspective: 1600px; position: relative; -webkit-tap-highlight-color: transparent; touch-action: manipulation; outline: none; }
+        .card-flip-wrap:focus-visible { box-shadow: 0 0 0 3px ${ACCENT}88; border-radius: 18px; }
+        .tap-flash { position: absolute; inset: 0; border-radius: 18px; pointer-events: none;
+          background: radial-gradient(circle, rgba(255,255,255,.55), transparent 70%);
+          opacity: 0; transition: opacity .45s ease-out; }
+        .tap-flash.show { opacity: .9; transition: opacity 0s; }
         .card-flip-inner {
           position: relative; width: 100%; height: 100%;
           transform-style: preserve-3d;
@@ -836,6 +841,7 @@ function StudyMode({ theme, set, onBack }) {
   const [order, setOrder] = useState(set.cards.map(c => c.id));
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [flash, setFlash] = useState(false);
   const [orientation, setOrientation] = useState("front"); // "front" | "back"
 
   useEffect(() => {
@@ -860,6 +866,12 @@ function StudyMode({ theme, set, onBack }) {
 
   const cardsById = useMemo(() => Object.fromEntries(set.cards.map(c => [c.id, c])), [set.cards]);
   const current = cardsById[order[index]];
+
+  const doFlip = () => {
+    setFlipped(f => !f);
+    setFlash(true);
+    setTimeout(() => setFlash(false), 30);
+  };
 
   const go = (dir) => {
     setFlipped(false);
@@ -899,7 +911,11 @@ function StudyMode({ theme, set, onBack }) {
         </div>
       </div>
 
-      <div className="card-flip-wrap" style={{ height: 320, marginBottom: 22 }} onClick={() => setFlipped(f => !f)}>
+      <div className="card-flip-wrap" role="button" tabIndex={0}
+        aria-label="Flip card"
+        style={{ height: 320, marginBottom: 22 }}
+        onClick={doFlip}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); doFlip(); } }}>
         <div className={flipped ? "card-flip-inner flipped" : "card-flip-inner"} style={{ height: "100%", cursor: "pointer" }}>
           <div className="card-face" style={{
             background: current.color, color: isLight(current.color) ? "#201a15" : "#F6EFDE",
@@ -922,6 +938,7 @@ function StudyMode({ theme, set, onBack }) {
             </div>
           </div>
         </div>
+        <div className={"tap-flash" + (flash ? " show" : "")} />
       </div>
       <div style={{ textAlign: "center", fontSize: 12.5, color: theme.textFaint, marginTop: -14, marginBottom: 18 }}>tap card to flip</div>
 
