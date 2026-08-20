@@ -111,6 +111,16 @@ https://<your-username>.github.io/<your-repo-name>/
 2. Open the same URL on your phone and **log in with the same email/password**.
 3. Add a card on your phone — it appears on your computer within a second or two, automatically.
 
+## Offline support
+
+This app works offline:
+
+- **The app itself** (all the code, styling, and the icon) is cached on your device the first time you open it online, so it'll still open with no signal at all.
+- **Your flashcards** are cached locally too, so you can browse folders and study already-loaded sets with zero connection.
+- Anything you add or edit while offline is saved on your device and automatically pushed to sync the moment you're back online.
+- A small "Synced" / "Offline" indicator near the top tells you which state you're in.
+- To install it as a real app icon on your phone: open the site, then use your browser's "Add to Home Screen" (iOS Safari) or it may prompt "Install app" automatically (Android Chrome).
+
 ## Good to know
 
 - **No credit card, ever.** Supabase's free tier doesn't ask for one, even to create the database.

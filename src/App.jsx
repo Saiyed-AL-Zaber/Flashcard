@@ -86,11 +86,28 @@ const THEMES = {
 /* ---------------------------------- root ---------------------------------- */
 
 export default function FlashcardApp({ user }) {
-  const [data, setData] = useState({ folders: [], sets: [] });
-  const [loaded, setLoaded] = useState(false);
-  const [dark, setDark] = useState(false);
+  const cacheKey = `flashcard_cache_${user.id}`;
+  const [data, setData] = useState(() => {
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) return JSON.parse(cached).data || { folders: [], sets: [] };
+    } catch (e) { /* ignore */ }
+    return { folders: [], sets: [] };
+  });
+  const [loaded, setLoaded] = useState(() => !!localStorage.getItem(cacheKey));
+  const [dark, setDark] = useState(() => {
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) return !!JSON.parse(cached).dark;
+    } catch (e) { /* ignore */ }
+    return false;
+  });
   const [nav, setNav] = useState({ screen: "home" });
-  const [connected, setConnected] = useState(true);
+  const [connected, setConnected] = useState(navigator.onLine);
+
+  const cacheLocally = (next) => {
+    try { localStorage.setItem(cacheKey, JSON.stringify(next)); } catch (e) { /* storage full or blocked — non-fatal */ }
+  };
 
   // fonts
   useEffect(() => {
@@ -101,28 +118,47 @@ export default function FlashcardApp({ user }) {
     return () => { document.head.removeChild(link); };
   }, []);
 
+  // reflect real connectivity immediately, and re-sync the moment we're back online
+  useEffect(() => {
+    const goOnline = () => { setConnected(true); resyncRef.current?.(); };
+    const goOffline = () => setConnected(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
   const applyRow = (row) => {
     if (!row) return;
-    setData({ folders: row.data?.folders || [], sets: row.data?.sets || [] });
+    const next = { folders: row.data?.folders || [], sets: row.data?.sets || [] };
+    setData(next);
+    const nextDark = typeof row.dark === "boolean" ? row.dark : dark;
     if (typeof row.dark === "boolean") setDark(row.dark);
+    cacheLocally({ data: next, dark: nextDark });
   };
+
+  const resyncRef = useRef(null);
 
   // initial load + live sync: fires on first load AND whenever this row changes on any device
   useEffect(() => {
     let channel;
-    (async () => {
+
+    const fetchLatest = async () => {
       const { data: row, error } = await supabase
         .from("flashcard_data")
         .select("*")
         .eq("user_id", user.id)
         .maybeSingle();
+      if (error) { setConnected(false); return; }
+      if (row) { applyRow(row); setConnected(true); }
+      else { await supabase.from("flashcard_data").upsert({ user_id: user.id, data: { folders: [], sets: [] } }); }
+    };
+    resyncRef.current = fetchLatest;
 
-      if (error) { console.error("load error", error); setConnected(false); }
-      else if (row) { applyRow(row); setConnected(true); }
-      else {
-        // first time this user has ever opened the app — create their row
-        await supabase.from("flashcard_data").upsert({ user_id: user.id, data: { folders: [], sets: [] } });
-      }
+    (async () => {
+      await fetchLatest();
       setLoaded(true);
 
       channel = supabase
@@ -138,6 +174,7 @@ export default function FlashcardApp({ user }) {
 
   const persist = async (next) => {
     setData(next);
+    cacheLocally({ data: next, dark });
     const { error } = await supabase.from("flashcard_data").upsert({ user_id: user.id, data: next });
     if (error) { console.error("save failed", error); setConnected(false); } else setConnected(true);
   };
@@ -145,6 +182,7 @@ export default function FlashcardApp({ user }) {
   const toggleDark = () => {
     setDark(prev => {
       const next = !prev;
+      cacheLocally({ data, dark: next });
       supabase.from("flashcard_data").upsert({ user_id: user.id, dark: next })
         .then(({ error }) => setConnected(!error));
       return next;
@@ -418,7 +456,7 @@ function Shell({ children, theme, dark, toggleDark, user, connected }) {
   );
 }
 
-function TopBar({ theme, title, subtitle, onBack, right }) {
+function TopBar({ theme, title, subtitle, onBack, right, icon }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22, gap: 12, flexWrap: "wrap" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -429,6 +467,15 @@ function TopBar({ theme, title, subtitle, onBack, right }) {
           }}>
             <ArrowLeft size={18} />
           </button>
+        )}
+        {icon && (
+          <div style={{
+            width: 42, height: 42, borderRadius: 12, background: ACCENT, flexShrink: 0,
+            display: "flex", alignItems: "center", justifyContent: "center", color: "#241d16",
+            boxShadow: "0 4px 12px rgba(227,167,59,.35)"
+          }}>
+            {icon}
+          </div>
         )}
         <div>
           <h1 className="disp" style={{ margin: 0, fontSize: "clamp(20px,4vw,28px)", fontWeight: 700, color: theme.textStrong }}>{title}</h1>
@@ -511,6 +558,7 @@ function Home({ theme, data, onOpenFolder, onAddFolder, onDeleteFolder, onRename
     <div>
       <TopBar theme={theme}
         title="Your Study Desk"
+        icon={<Layers size={20} />}
         subtitle={`${data.folders.length} folder${data.folders.length === 1 ? "" : "s"} · ${data.sets.length} set${data.sets.length === 1 ? "" : "s"}`}
         right={<Btn theme={theme} onClick={() => setShowNew(true)}><FolderPlus size={16} /> New folder</Btn>}
       />
