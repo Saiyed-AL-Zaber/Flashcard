@@ -111,6 +111,14 @@ https://<your-username>.github.io/<your-repo-name>/
 2. Open the same URL on your phone and **log in with the same email/password**.
 3. Add a card on your phone — it appears on your computer within a second or two, automatically.
 
+## Resuming where you left off
+
+If you leave in the middle of a Study or Test session — close the tab, hit back,
+lose signal, whatever — reopening that same set drops you back on the exact
+card and question you were on, with your marks/answers intact. It only resets
+when you deliberately finish (the "Done" button) or start a new attempt
+("Restudy all" / "Start test" again).
+
 ## Offline support
 
 This app works offline:

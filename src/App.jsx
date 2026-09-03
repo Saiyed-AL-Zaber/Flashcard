@@ -87,6 +87,8 @@ const THEMES = {
 
 export default function FlashcardApp({ user }) {
   const cacheKey = `flashcard_cache_${user.id}`;
+  const navKey = `flashcard_nav_${user.id}`;
+  const progressKey = `flashcard_progress_${user.id}`;
   const [data, setData] = useState(() => {
     try {
       const cached = localStorage.getItem(cacheKey);
@@ -102,11 +104,54 @@ export default function FlashcardApp({ user }) {
     } catch (e) { /* ignore */ }
     return false;
   });
-  const [nav, setNav] = useState({ screen: "home" });
+  const [nav, setNav] = useState(() => {
+    try {
+      const raw = localStorage.getItem(navKey);
+      if (raw) return JSON.parse(raw);
+    } catch (e) { /* ignore */ }
+    return { screen: "home" };
+  });
+  const [progress, setProgress] = useState(() => {
+    try {
+      const raw = localStorage.getItem(progressKey);
+      if (raw) return JSON.parse(raw);
+    } catch (e) { /* ignore */ }
+    return { study: {}, test: {} };
+  });
   const [connected, setConnected] = useState(navigator.onLine);
 
   const cacheLocally = (next) => {
     try { localStorage.setItem(cacheKey, JSON.stringify(next)); } catch (e) { /* storage full or blocked — non-fatal */ }
+  };
+
+  // remember exactly which screen you're on, and your live study/test progress,
+  // so leaving mid-session and coming back (even after closing the tab) resumes it
+  useEffect(() => {
+    try { localStorage.setItem(navKey, JSON.stringify(nav)); } catch (e) { /* ignore */ }
+  }, [nav]);
+  useEffect(() => {
+    try { localStorage.setItem(progressKey, JSON.stringify(progress)); } catch (e) { /* ignore */ }
+  }, [progress]);
+
+  const setStudyProgress = (setId, snapshot) => {
+    setProgress(p => ({ ...p, study: { ...p.study, [setId]: snapshot } }));
+  };
+  const clearStudyProgress = (setId) => {
+    setProgress(p => {
+      if (!(setId in p.study)) return p;
+      const study = { ...p.study }; delete study[setId];
+      return { ...p, study };
+    });
+  };
+  const setTestProgress = (setId, snapshot) => {
+    setProgress(p => ({ ...p, test: { ...p.test, [setId]: snapshot } }));
+  };
+  const clearTestProgress = (setId) => {
+    setProgress(p => {
+      if (!(setId in p.test)) return p;
+      const test = { ...p.test }; delete test[setId];
+      return { ...p, test };
+    });
   };
 
   // fonts
@@ -263,6 +308,16 @@ export default function FlashcardApp({ user }) {
   const currentSet = data.sets.find(s => s.id === nav.setId);
   const theme = dark ? THEMES.dark : THEMES.light;
 
+  // if a restored screen points at a folder/set that's gone (e.g. deleted on
+  // another device), fall back home instead of showing a blank screen
+  useEffect(() => {
+    if (!loaded) return;
+    const needsFolder = nav.screen === "folder";
+    const needsSet = ["edit", "study", "test-setup", "test", "test-results"].includes(nav.screen);
+    if (needsFolder && !currentFolder) setNav({ screen: "home" });
+    else if (needsSet && !currentSet) setNav({ screen: "home" });
+  }, [loaded, data]); // eslint-disable-line
+
   if (!loaded) {
     return (
       <Shell theme={theme} dark={dark} toggleDark={toggleDark} user={user} connected={connected}>
@@ -308,16 +363,22 @@ export default function FlashcardApp({ user }) {
           />
         )}
         {nav.screen === "study" && currentSet && (
-          <StudyMode theme={theme} set={currentSet} onBack={() => openFolder(currentSet.folderId)} />
+          <StudyMode theme={theme} set={currentSet}
+            onBack={() => openFolder(currentSet.folderId)}
+            initialState={progress.study[currentSet.id]}
+            onProgress={(snap) => setStudyProgress(currentSet.id, snap)}
+            onFinishDone={() => { clearStudyProgress(currentSet.id); openFolder(currentSet.folderId); }} />
         )}
         {nav.screen === "test-setup" && currentSet && (
           <TestSetup theme={theme} set={currentSet} onBack={() => openFolder(currentSet.folderId)}
-            onStart={(config) => setNav({ screen: "test", setId: currentSet.id, config })} />
+            onStart={(config) => { clearTestProgress(currentSet.id); setNav({ screen: "test", setId: currentSet.id, config }); }} />
         )}
         {nav.screen === "test" && currentSet && (
           <TestRunner theme={theme} set={currentSet} config={nav.config}
+            initialState={progress.test[currentSet.id]}
+            onProgress={(snap) => setTestProgress(currentSet.id, snap)}
             onExit={() => openFolder(currentSet.folderId)}
-            onFinish={(results) => setNav({ screen: "test-results", setId: currentSet.id, config: nav.config, results })} />
+            onFinish={(results) => { clearTestProgress(currentSet.id); setNav({ screen: "test-results", setId: currentSet.id, config: nav.config, results }); }} />
         )}
         {nav.screen === "test-results" && currentSet && (
           <TestResults theme={theme} set={currentSet} config={nav.config} results={nav.results}
@@ -898,18 +959,24 @@ function sortCards(cards, sortBy) {
   }
 }
 
-function StudyMode({ theme, set, onBack }) {
-  const [sortBy, setSortBy] = useState("oldest");
-  const [shuffled, setShuffled] = useState(false);
-  const [order, setOrder] = useState(set.cards.map(c => c.id));
-  const [index, setIndex] = useState(0);
+function StudyMode({ theme, set, onBack, initialState, onProgress, onFinishDone }) {
+  const validOrder = initialState?.order?.filter(id => set.cards.some(c => c.id === id));
+  const hasValidResume = validOrder && validOrder.length === set.cards.length;
+
+  const [sortBy, setSortBy] = useState(initialState?.sortBy ?? "oldest");
+  const [shuffled, setShuffled] = useState(initialState?.shuffled ?? false);
+  const [order, setOrder] = useState(hasValidResume ? validOrder : set.cards.map(c => c.id));
+  const [index, setIndex] = useState(hasValidResume ? Math.min(initialState.index ?? 0, set.cards.length - 1) : 0);
   const [flipped, setFlipped] = useState(false);
   const [flash, setFlash] = useState(false);
-  const [orientation, setOrientation] = useState("front"); // "front" | "back"
-  const [marks, setMarks] = useState({}); // cardId -> "known" | "unknown"
-  const [phase, setPhase] = useState("study"); // "study" | "summary"
+  const [orientation, setOrientation] = useState(initialState?.orientation ?? "front"); // "front" | "back"
+  const [marks, setMarks] = useState(hasValidResume ? (initialState.marks || {}) : {}); // cardId -> "known" | "unknown"
+  const [phase, setPhase] = useState(hasValidResume ? (initialState.phase || "study") : "study"); // "study" | "summary"
+
+  const skipNextReset = useRef(true); // don't let the mount-time effect below clobber a restored session
 
   useEffect(() => {
+    if (skipNextReset.current) { skipNextReset.current = false; return; }
     const base = sortCards(set.cards, sortBy).map(c => c.id);
     setOrder(shuffled ? shuffleArr(base) : base);
     setIndex(0);
@@ -917,6 +984,11 @@ function StudyMode({ theme, set, onBack }) {
     setMarks({});
     setPhase("study");
   }, [sortBy]); // eslint-disable-line
+
+  // report live progress upstream so leaving mid-session and coming back resumes exactly here
+  useEffect(() => {
+    onProgress?.({ order, index, marks, sortBy, shuffled, orientation, phase });
+  }, [order, index, marks, sortBy, shuffled, orientation, phase]); // eslint-disable-line
 
   const reshuffle = () => {
     setShuffled(true);
@@ -1036,7 +1108,7 @@ function StudyMode({ theme, set, onBack }) {
     const missedCards = unknownIds.map(id => cardsById[id]).filter(Boolean);
     return (
       <div>
-        <TopBar theme={theme} title={set.name} subtitle="Session complete" onBack={onBack} />
+        <TopBar theme={theme} title={set.name} subtitle="Session complete" onBack={onFinishDone ?? onBack} />
         <div className="scale-in" style={{
           textAlign: "center", padding: "30px 20px", borderRadius: 18, marginBottom: 22,
           background: theme.surface, border: `1px solid ${theme.border}`
@@ -1069,7 +1141,7 @@ function StudyMode({ theme, set, onBack }) {
             <Btn theme={theme} color={set.color} onClick={reviewMissed}><RefreshCw size={15} /> Review missed cards</Btn>
           )}
           <Btn theme={theme} variant="ghost" onClick={restudyAll}><RotateCw size={15} /> Restudy all</Btn>
-          <Btn theme={theme} variant="ghost" onClick={onBack}>Done</Btn>
+          <Btn theme={theme} variant="ghost" onClick={onFinishDone ?? onBack}>Done</Btn>
         </div>
       </div>
     );
@@ -1259,13 +1331,20 @@ function buildQuestions(set, config) {
   });
 }
 
-function TestRunner({ theme, set, config, onExit, onFinish }) {
-  const [questions] = useState(() => buildQuestions(set, config));
-  const [i, setI] = useState(0);
-  const [answers, setAnswers] = useState([]);
+function TestRunner({ theme, set, config, onExit, onFinish, initialState, onProgress }) {
+  const [questions] = useState(() =>
+    (initialState?.questions?.length ? initialState.questions : buildQuestions(set, config))
+  );
+  const [i, setI] = useState(initialState?.i ?? 0);
+  const [answers, setAnswers] = useState(initialState?.answers ?? []);
   const [selected, setSelected] = useState(null);
   const [written, setWritten] = useState("");
   const [revealed, setRevealed] = useState(false);
+
+  // report live progress upstream so leaving mid-test and coming back resumes exactly here
+  useEffect(() => {
+    onProgress?.({ questions, i, answers });
+  }, [i, answers]); // eslint-disable-line
 
   const q = questions[i];
   if (!q) return null;
