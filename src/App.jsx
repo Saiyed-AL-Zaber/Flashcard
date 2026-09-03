@@ -298,11 +298,34 @@ export default function FlashcardApp({ user }) {
     });
   };
 
-  const goHome = () => setNav({ screen: "home" });
-  const openFolder = (folderId) => setNav({ screen: "folder", folderId });
-  const openEdit = (setId) => setNav({ screen: "edit", setId });
-  const openStudy = (setId) => setNav({ screen: "study", setId });
-  const openTestSetup = (setId) => setNav({ screen: "test-setup", setId });
+  // Real browser History integration: forward navigation pushes a history
+  // entry, and both our in-app back arrows AND the phone/browser back button
+  // pop through it via popstate — so back never dumps you out of the app
+  // until you've actually gone back past where you started.
+  const navigate = (next) => {
+    window.history.pushState(next, "", "");
+    setNav(next);
+  };
+  const goBack = () => window.history.back();
+
+  useEffect(() => {
+    const onPopState = (e) => setNav(e.state || { screen: "home" });
+    window.addEventListener("popstate", onPopState);
+    // lay a "home" entry underneath whatever screen we opened/resumed on,
+    // so even a deep-linked reload has somewhere safe to go back to
+    window.history.replaceState({ screen: "home" }, "", "");
+    setNav(current => {
+      if (current.screen !== "home") window.history.pushState(current, "", "");
+      return current;
+    });
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []); // eslint-disable-line
+
+  const goHome = () => navigate({ screen: "home" });
+  const openFolder = (folderId) => navigate({ screen: "folder", folderId });
+  const openEdit = (setId) => navigate({ screen: "edit", setId });
+  const openStudy = (setId) => navigate({ screen: "study", setId });
+  const openTestSetup = (setId) => navigate({ screen: "test-setup", setId });
 
   const currentFolder = data.folders.find(f => f.id === nav.folderId);
   const currentSet = data.sets.find(s => s.id === nav.setId);
@@ -314,8 +337,10 @@ export default function FlashcardApp({ user }) {
     if (!loaded) return;
     const needsFolder = nav.screen === "folder";
     const needsSet = ["edit", "study", "test-setup", "test", "test-results"].includes(nav.screen);
-    if (needsFolder && !currentFolder) setNav({ screen: "home" });
-    else if (needsSet && !currentSet) setNav({ screen: "home" });
+    if ((needsFolder && !currentFolder) || (needsSet && !currentSet)) {
+      window.history.replaceState({ screen: "home" }, "", "");
+      setNav({ screen: "home" });
+    }
   }, [loaded, data]); // eslint-disable-line
 
   if (!loaded) {
@@ -342,7 +367,7 @@ export default function FlashcardApp({ user }) {
             theme={theme}
             folder={currentFolder}
             sets={data.sets.filter(s => s.folderId === currentFolder.id)}
-            onBack={goHome}
+            onBack={goBack}
             onAddSet={addSet}
             onOpenEdit={openEdit}
             onOpenStudy={openStudy}
@@ -354,7 +379,7 @@ export default function FlashcardApp({ user }) {
           <SetEditor
             theme={theme}
             set={currentSet}
-            onBack={() => openFolder(currentSet.folderId)}
+            onBack={goBack}
             onUpdateSet={updateSet}
             onAddCard={addCard}
             onAddBlankCards={addBlankCards}
@@ -364,27 +389,28 @@ export default function FlashcardApp({ user }) {
         )}
         {nav.screen === "study" && currentSet && (
           <StudyMode theme={theme} set={currentSet}
-            onBack={() => openFolder(currentSet.folderId)}
+            onBack={goBack}
             initialState={progress.study[currentSet.id]}
             onProgress={(snap) => setStudyProgress(currentSet.id, snap)}
-            onFinishDone={() => { clearStudyProgress(currentSet.id); openFolder(currentSet.folderId); }} />
+            onFinishDone={() => { clearStudyProgress(currentSet.id); goBack(); }} />
         )}
         {nav.screen === "test-setup" && currentSet && (
-          <TestSetup theme={theme} set={currentSet} onBack={() => openFolder(currentSet.folderId)}
-            onStart={(config) => { clearTestProgress(currentSet.id); setNav({ screen: "test", setId: currentSet.id, config }); }} />
+          <TestSetup theme={theme} set={currentSet} onBack={goBack}
+            onStart={(config) => { clearTestProgress(currentSet.id); navigate({ screen: "test", setId: currentSet.id, config }); }} />
         )}
         {nav.screen === "test" && currentSet && (
-          <TestRunner theme={theme} set={currentSet} config={nav.config}
+          <TestRunner key={`test-${currentSet.id}-${nav.resetKey || 0}`} theme={theme} set={currentSet} config={nav.config}
             initialState={progress.test[currentSet.id]}
             onProgress={(snap) => setTestProgress(currentSet.id, snap)}
-            onExit={() => openFolder(currentSet.folderId)}
-            onFinish={(results) => { clearTestProgress(currentSet.id); setNav({ screen: "test-results", setId: currentSet.id, config: nav.config, results }); }} />
+            onReset={() => { clearTestProgress(currentSet.id); setNav(n => ({ ...n, resetKey: (n.resetKey || 0) + 1 })); }}
+            onExit={goBack}
+            onFinish={(results) => { clearTestProgress(currentSet.id); navigate({ screen: "test-results", setId: currentSet.id, config: nav.config, results }); }} />
         )}
         {nav.screen === "test-results" && currentSet && (
           <TestResults theme={theme} set={currentSet} config={nav.config} results={nav.results}
-            onRetryAll={() => setNav({ screen: "test", setId: currentSet.id, config: nav.config })}
-            onRetryMissed={(missedIds) => setNav({ screen: "test", setId: currentSet.id, config: { ...nav.config, onlyIds: missedIds } })}
-            onDone={() => openFolder(currentSet.folderId)}
+            onRetryAll={() => navigate({ screen: "test", setId: currentSet.id, config: nav.config })}
+            onRetryMissed={(missedIds) => navigate({ screen: "test", setId: currentSet.id, config: { ...nav.config, onlyIds: missedIds } })}
+            onDone={goBack}
           />
         )}
       </div>
@@ -1168,6 +1194,9 @@ function StudyMode({ theme, set, onBack, initialState, onProgress, onFinishDone 
         <Btn theme={theme} size="sm" variant={shuffled ? "solid" : "ghost"} color={set.color} onClick={shuffled ? unshuffle : reshuffle}>
           <Shuffle size={14} /> {shuffled ? "Shuffled" : "Shuffle"}
         </Btn>
+        <Btn theme={theme} size="sm" variant="ghost" onClick={restudyAll} title="Start this session over from card 1">
+          <RotateCw size={14} /> Reset
+        </Btn>
         <div style={{ display: "flex", background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 10, overflow: "hidden" }}>
           <button onClick={() => setOrientation("front")} className="iconbtn" style={{
             padding: "9px 12px", fontSize: 13, border: "none", color: orientation === "front" ? theme.onAccent : theme.text,
@@ -1331,7 +1360,7 @@ function buildQuestions(set, config) {
   });
 }
 
-function TestRunner({ theme, set, config, onExit, onFinish, initialState, onProgress }) {
+function TestRunner({ theme, set, config, onExit, onFinish, initialState, onProgress, onReset }) {
   const [questions] = useState(() =>
     (initialState?.questions?.length ? initialState.questions : buildQuestions(set, config))
   );
@@ -1367,7 +1396,8 @@ function TestRunner({ theme, set, config, onExit, onFinish, initialState, onProg
 
   return (
     <div>
-      <TopBar theme={theme} title={`Test: ${set.name}`} subtitle={`Question ${i + 1} of ${questions.length}`} onBack={onExit} />
+      <TopBar theme={theme} title={`Test: ${set.name}`} subtitle={`Question ${i + 1} of ${questions.length}`} onBack={onExit}
+        right={<Btn theme={theme} size="sm" variant="ghost" onClick={onReset} title="Start this test over with fresh questions"><RotateCw size={14} /> Reset</Btn>} />
 
       <div style={{ height: 6, background: theme.surface, borderRadius: 4, marginBottom: 26, overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${(i / questions.length) * 100}%`, background: set.color, transition: "width .45s cubic-bezier(0.65,0,0.35,1)" }} />
