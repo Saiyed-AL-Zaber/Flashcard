@@ -27,7 +27,19 @@ export default defineConfig({
       workbox: {
         // cache the app shell (JS/CSS/HTML/icons) so the app itself opens with no connection
         globPatterns: ["**/*.{js,css,html,png,svg}"],
+        // when offline and the browser can't reach the network for a page
+        // navigation, serve the cached app shell instead of a browser error page
+        navigateFallback: "/Flashcard/index.html",
         runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com",
+            handler: "CacheFirst",
+            options: {
+              cacheName: "google-fonts-cache",
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           {
             // Supabase API calls: try the network first, but don't hang forever offline
             urlPattern: ({ url }) => url.hostname.endsWith(".supabase.co"),

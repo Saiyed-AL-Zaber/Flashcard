@@ -11,11 +11,19 @@ export default function AuthGate({ children }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
+    // getSession() reads the cached session from local storage and should
+    // resolve instantly even offline — but as a safety net against a hung
+    // promise with zero connectivity, don't let "checking" spin forever.
+    let settled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      settled = true;
+      setUser(data.session?.user ?? null);
+    });
+    const timeout = setTimeout(() => { if (!settled) setUser(null); }, 3000);
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
-    return () => listener.subscription.unsubscribe();
+    return () => { clearTimeout(timeout); listener.subscription.unsubscribe(); };
   }, []);
 
   const submit = async (e) => {
