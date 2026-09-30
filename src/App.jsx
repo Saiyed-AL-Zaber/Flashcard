@@ -811,14 +811,15 @@ function SetRow({ theme, s, onOpenEdit, onOpenStudy, onOpenTest, onDelete }) {
 function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards, onUpdateCard, onDeleteCard }) {
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
+  const [example, setExample] = useState("");
   const [color, setColor] = useState(CARD_COLORS[0].hex);
   const [bulkCount, setBulkCount] = useState(5);
   const frontRef = useRef(null);
 
   const submit = () => {
     if (!front.trim() || !back.trim()) return;
-    onAddCard(set.id, { front: front.trim(), back: back.trim(), color });
-    setFront(""); setBack("");
+    onAddCard(set.id, { front: front.trim(), back: back.trim(), example: example.trim(), color });
+    setFront(""); setBack(""); setExample("");
     frontRef.current?.focus();
   };
 
@@ -844,6 +845,12 @@ function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
               style={{ width: "100%", background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 10, padding: "10px 12px", color: theme.text, fontSize: 14, resize: "vertical" }} />
           </div>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 12.5, color: theme.textDim, marginBottom: 6 }}>Example sentence <span style={{ color: theme.textFaint }}>(optional)</span></div>
+          <textarea value={example} onChange={e => setExample(e.target.value)} rows={2} placeholder="e.g. The mitochondria produce the cell's energy."
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+            style={{ width: "100%", background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 10, padding: "10px 12px", color: theme.text, fontSize: 14, resize: "vertical" }} />
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14, flexWrap: "wrap", gap: 12 }}>
           <div>
@@ -895,8 +902,9 @@ function CardRow({ theme, card, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(isBlank);
   const [front, setFront] = useState(card.front);
   const [back, setBack] = useState(card.back);
+  const [example, setExample] = useState(card.example || "");
 
-  const save = () => { onUpdate({ front, back }); setEditing(false); };
+  const save = () => { onUpdate({ front, back, example }); setEditing(false); };
 
   return (
     <div className="hoverlift" style={{
@@ -906,18 +914,30 @@ function CardRow({ theme, card, onUpdate, onDelete }) {
     }}>
       <div style={{ width: 6, alignSelf: "stretch", borderRadius: 4, background: card.color, minHeight: 40, transition: "background-color .3s ease" }} />
       {editing ? (
-        <div style={{ flex: "1 1 220px", minWidth: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
-          <input value={front} onChange={e => setFront(e.target.value)} placeholder="Term / front"
+        <div style={{ flex: "1 1 220px", minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+            <input value={front} onChange={e => setFront(e.target.value)} placeholder="Term / front"
+              onKeyDown={e => { if (e.key === "Enter") save(); }}
+              style={{ width: "100%", background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: "8px 10px", color: theme.text, boxSizing: "border-box" }} />
+            <input value={back} onChange={e => setBack(e.target.value)} placeholder="Definition / back"
+              onKeyDown={e => { if (e.key === "Enter") save(); }}
+              style={{ width: "100%", background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: "8px 10px", color: theme.text, boxSizing: "border-box" }} />
+          </div>
+          <input value={example} onChange={e => setExample(e.target.value)} placeholder="Example sentence (optional)"
             onKeyDown={e => { if (e.key === "Enter") save(); }}
-            style={{ width: "100%", background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: "8px 10px", color: theme.text, boxSizing: "border-box" }} />
-          <input value={back} onChange={e => setBack(e.target.value)} placeholder="Definition / back"
-            onKeyDown={e => { if (e.key === "Enter") save(); }}
-            style={{ width: "100%", background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: "8px 10px", color: theme.text, boxSizing: "border-box" }} />
+            style={{ width: "100%", background: theme.inputBg, border: `1px solid ${theme.border}`, borderRadius: 8, padding: "8px 10px", color: theme.text, boxSizing: "border-box", fontStyle: "italic", fontSize: 13.5 }} />
         </div>
       ) : (
-        <div style={{ flex: "1 1 220px", minWidth: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
-          <div style={{ fontSize: 14, wordBreak: "break-word" }}>{card.front}</div>
-          <div style={{ fontSize: 14, color: theme.textDim, wordBreak: "break-word" }}>{card.back}</div>
+        <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+            <div style={{ fontSize: 14, wordBreak: "break-word" }}>{card.front}</div>
+            <div style={{ fontSize: 14, color: theme.textDim, wordBreak: "break-word" }}>{card.back}</div>
+          </div>
+          {card.example && (
+            <div style={{ fontSize: 12.5, color: theme.textFaint, fontStyle: "italic", marginTop: 6, wordBreak: "break-word" }}>
+              “{card.example}”
+            </div>
+          )}
         </div>
       )}
       <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center", marginLeft: "auto" }}>
@@ -1233,6 +1253,9 @@ function StudyMode({ theme, set, onBack, initialState, onProgress, onFinishDone 
               <div>
                 <div className="hand" style={{ fontSize: 15, opacity: 0.65, marginBottom: 10 }}>{frontFirst ? "Term" : "Definition"}</div>
                 <div className="disp" style={{ fontSize: "clamp(20px, 3.4vw, 28px)", fontWeight: 600, lineHeight: 1.3 }}>{faceA}</div>
+                {!frontFirst && current.example && (
+                  <div style={{ fontSize: 14, opacity: 0.75, fontStyle: "italic", marginTop: 12, lineHeight: 1.4 }}>“{current.example}”</div>
+                )}
               </div>
             </div>
             <div className="card-face card-back-face" style={{
@@ -1243,6 +1266,9 @@ function StudyMode({ theme, set, onBack, initialState, onProgress, onFinishDone 
               <div>
                 <div className="hand" style={{ fontSize: 15, opacity: 0.65, marginBottom: 10 }}>{frontFirst ? "Definition" : "Term"}</div>
                 <div className="disp" style={{ fontSize: "clamp(20px, 3.4vw, 28px)", fontWeight: 600, lineHeight: 1.3 }}>{faceB}</div>
+                {frontFirst && current.example && (
+                  <div style={{ fontSize: 14, opacity: 0.75, fontStyle: "italic", marginTop: 12, lineHeight: 1.4 }}>“{current.example}”</div>
+                )}
               </div>
             </div>
           </div>
@@ -1454,7 +1480,12 @@ function TestRunner({ theme, set, config, onExit, onFinish, initialState, onProg
             placeholder="Type your answer…"
             style={{ width: "100%", background: theme.inputBg, border: `1px solid ${revealed ? (written.trim().toLowerCase() === q.answer.trim().toLowerCase() ? theme.correctBorder : theme.wrongBorder) : theme.border}`, borderRadius: 12, padding: "13px 16px", color: theme.text, fontSize: 15, marginBottom: 14 }} />
           {revealed && (
-            <div style={{ fontSize: 13.5, color: theme.textDim, marginBottom: 14 }}>Correct answer: <strong style={{ color: theme.text }}>{q.answer}</strong></div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 13.5, color: theme.textDim }}>Correct answer: <strong style={{ color: theme.text }}>{q.answer}</strong></div>
+              {q.card.example && (
+                <div style={{ fontSize: 13, color: theme.textFaint, fontStyle: "italic", marginTop: 4 }}>“{q.card.example}”</div>
+              )}
+            </div>
           )}
           <Btn theme={theme} color={set.color} disabled={!written.trim() || revealed} onClick={() => {
             const correct = written.trim().toLowerCase() === q.answer.trim().toLowerCase();

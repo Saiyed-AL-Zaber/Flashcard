@@ -44,7 +44,10 @@ export default function AuthGate({ children }) {
         }
       }
     } catch (err) {
-      setError(err.message || "Something went wrong.");
+      const offline = !navigator.onLine || /fetch/i.test(err.message || "");
+      setError(offline
+        ? "No internet connection. Logging in for the first time needs a connection — once you're logged in, the app will keep working offline."
+        : (friendlyError(err.code) || err.message || "Something went wrong."));
     } finally {
       setBusy(false);
     }
@@ -90,6 +93,18 @@ export default function AuthGate({ children }) {
   }
 
   return children(user);
+}
+
+function friendlyError(code) {
+  const map = {
+    "auth/email-already-in-use": "That email already has an account — try logging in instead.",
+    "auth/invalid-email": "That email address doesn't look right.",
+    "auth/weak-password": "Password should be at least 6 characters.",
+    "invalid_credentials": "Email or password is incorrect.",
+    "user_not_found": "No account with that email — try signing up.",
+    "email_not_confirmed": "Check your email and confirm your account before logging in.",
+  };
+  return map[code];
 }
 
 const styles = {
