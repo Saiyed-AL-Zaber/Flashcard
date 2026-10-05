@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Folder, Plus, Play, Shuffle, ArrowLeft, Check, X, Edit2, Trash2,
-  ChevronLeft, ChevronRight, RotateCw, BookOpen, ListChecks, PenLine,
+  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, RotateCw, BookOpen, ListChecks, PenLine,
   Settings2, FolderPlus, Layers, RefreshCw, Award, ArrowRight, Palette,
   Sun, Moon, LogOut, Cloud, CloudOff
 } from "lucide-react";
@@ -297,6 +297,20 @@ export default function FlashcardApp({ user }) {
         : s)
     });
   };
+  const moveCard = (setId, cardId, direction) => {
+    persist({
+      ...data,
+      sets: data.sets.map(s => {
+        if (s.id !== setId) return s;
+        const i = s.cards.findIndex(c => c.id === cardId);
+        const j = direction === "up" ? i - 1 : i + 1;
+        if (i === -1 || j < 0 || j >= s.cards.length) return s;
+        const cards = [...s.cards];
+        [cards[i], cards[j]] = [cards[j], cards[i]];
+        return { ...s, cards };
+      })
+    });
+  };
 
   // Real browser History integration: forward navigation pushes a history
   // entry, and both our in-app back arrows AND the phone/browser back button
@@ -385,6 +399,7 @@ export default function FlashcardApp({ user }) {
             onAddBlankCards={addBlankCards}
             onUpdateCard={updateCard}
             onDeleteCard={deleteCard}
+            onMoveCard={moveCard}
           />
         )}
         {nav.screen === "study" && currentSet && (
@@ -808,7 +823,7 @@ function SetRow({ theme, s, onOpenEdit, onOpenStudy, onOpenTest, onDelete }) {
 
 /* ---------------------------------- SET EDITOR ---------------------------------- */
 
-function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards, onUpdateCard, onDeleteCard }) {
+function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards, onUpdateCard, onDeleteCard, onMoveCard }) {
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
   const [example, setExample] = useState("");
@@ -886,10 +901,12 @@ function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards
         <EmptyState theme={theme} icon={PenLine} title="No cards yet" sub="Add a card above, or add a batch of blanks to fill in later." action={null} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {set.cards.map(c => (
+          {set.cards.map((c, i) => (
             <CardRow key={c.id} theme={theme} card={c}
               onUpdate={(patch) => onUpdateCard(set.id, c.id, patch)}
-              onDelete={() => onDeleteCard(set.id, c.id)} />
+              onDelete={() => onDeleteCard(set.id, c.id)}
+              onMoveUp={i > 0 ? () => onMoveCard(set.id, c.id, "up") : null}
+              onMoveDown={i < set.cards.length - 1 ? () => onMoveCard(set.id, c.id, "down") : null} />
           ))}
         </div>
       )}
@@ -897,7 +914,7 @@ function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards
   );
 }
 
-function CardRow({ theme, card, onUpdate, onDelete }) {
+function CardRow({ theme, card, onUpdate, onDelete, onMoveUp, onMoveDown }) {
   const isBlank = !card.front.trim() && !card.back.trim();
   const [editing, setEditing] = useState(isBlank);
   const [front, setFront] = useState(card.front);
@@ -912,6 +929,26 @@ function CardRow({ theme, card, onUpdate, onDelete }) {
       border: isBlank ? `1.5px dashed ${theme.borderStrong}` : `1px solid ${theme.border}`,
       borderRadius: 12, padding: 12, display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap"
     }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0, alignSelf: "stretch", justifyContent: "center" }}>
+        <button onClick={onMoveUp} disabled={!onMoveUp} title="Move card up" className="iconbtn"
+          style={{
+            background: "none", border: `1px solid ${theme.border}`, borderRadius: 8, width: 28, height: 28,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: onMoveUp ? theme.textFaint : theme.border, cursor: onMoveUp ? "pointer" : "default",
+            opacity: onMoveUp ? 1 : 0.4, touchAction: "manipulation"
+          }}>
+          <ChevronUp size={15} />
+        </button>
+        <button onClick={onMoveDown} disabled={!onMoveDown} title="Move card down" className="iconbtn"
+          style={{
+            background: "none", border: `1px solid ${theme.border}`, borderRadius: 8, width: 28, height: 28,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: onMoveDown ? theme.textFaint : theme.border, cursor: onMoveDown ? "pointer" : "default",
+            opacity: onMoveDown ? 1 : 0.4, touchAction: "manipulation"
+          }}>
+          <ChevronDown size={15} />
+        </button>
+      </div>
       <div style={{ width: 6, alignSelf: "stretch", borderRadius: 4, background: card.color, minHeight: 40, transition: "background-color .3s ease" }} />
       {editing ? (
         <div style={{ flex: "1 1 220px", minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
