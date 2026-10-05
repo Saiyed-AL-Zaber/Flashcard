@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Folder, Plus, Play, Shuffle, ArrowLeft, Check, X, Edit2, Trash2,
-  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, RotateCw, BookOpen, ListChecks, PenLine,
+  ChevronLeft, ChevronRight, GripVertical, RotateCw, BookOpen, ListChecks, PenLine,
   Settings2, FolderPlus, Layers, RefreshCw, Award, ArrowRight, Palette,
   Sun, Moon, LogOut, Cloud, CloudOff
 } from "lucide-react";
@@ -297,16 +297,15 @@ export default function FlashcardApp({ user }) {
         : s)
     });
   };
-  const moveCard = (setId, cardId, direction) => {
+  const reorderCards = (setId, orderedIds) => {
     persist({
       ...data,
       sets: data.sets.map(s => {
         if (s.id !== setId) return s;
-        const i = s.cards.findIndex(c => c.id === cardId);
-        const j = direction === "up" ? i - 1 : i + 1;
-        if (i === -1 || j < 0 || j >= s.cards.length) return s;
-        const cards = [...s.cards];
-        [cards[i], cards[j]] = [cards[j], cards[i]];
+        const byId = Object.fromEntries(s.cards.map(c => [c.id, c]));
+        const cards = orderedIds.map(id => byId[id]).filter(Boolean);
+        // safety net: if something didn't line up, don't lose any cards
+        if (cards.length !== s.cards.length) return s;
         return { ...s, cards };
       })
     });
@@ -399,7 +398,7 @@ export default function FlashcardApp({ user }) {
             onAddBlankCards={addBlankCards}
             onUpdateCard={updateCard}
             onDeleteCard={deleteCard}
-            onMoveCard={moveCard}
+            onReorderCards={reorderCards}
           />
         )}
         {nav.screen === "study" && currentSet && (
@@ -823,7 +822,7 @@ function SetRow({ theme, s, onOpenEdit, onOpenStudy, onOpenTest, onDelete }) {
 
 /* ---------------------------------- SET EDITOR ---------------------------------- */
 
-function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards, onUpdateCard, onDeleteCard, onMoveCard }) {
+function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards, onUpdateCard, onDeleteCard, onReorderCards }) {
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
   const [example, setExample] = useState("");
@@ -900,21 +899,120 @@ function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards
       {set.cards.length === 0 ? (
         <EmptyState theme={theme} icon={PenLine} title="No cards yet" sub="Add a card above, or add a batch of blanks to fill in later." action={null} />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {set.cards.map((c, i) => (
-            <CardRow key={c.id} theme={theme} card={c}
-              onUpdate={(patch) => onUpdateCard(set.id, c.id, patch)}
-              onDelete={() => onDeleteCard(set.id, c.id)}
-              onMoveUp={i > 0 ? () => onMoveCard(set.id, c.id, "up") : null}
-              onMoveDown={i < set.cards.length - 1 ? () => onMoveCard(set.id, c.id, "down") : null} />
-          ))}
-        </div>
+        <ReorderableCardList
+          theme={theme}
+          cards={set.cards}
+          onUpdateCard={(cardId, patch) => onUpdateCard(set.id, cardId, patch)}
+          onDeleteCard={(cardId) => onDeleteCard(set.id, cardId)}
+          onReorder={(orderedIds) => onReorderCards(set.id, orderedIds)}
+        />
       )}
     </div>
   );
 }
 
-function CardRow({ theme, card, onUpdate, onDelete, onMoveUp, onMoveDown }) {
+/* drag-to-reorder: decision state lives in refs (see swipe gesture notes
+   above) so a fast drag never races a pending re-render; "order" (the
+   array of card ids in their current on-screen position) is the only
+   piece that needs to be React state, since it drives what's rendered. */
+const ROW_GAP = 10;
+
+function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReorder }) {
+  const [order, setOrder] = useState(() => cards.map(c => c.id));
+  const [dragId, setDragId] = useState(null);
+  const [dragY, setDragY] = useState(0);
+
+  const cardsById = useMemo(() => Object.fromEntries(cards.map(c => [c.id, c])), [cards]);
+  const rowRefs = useRef({});
+  const draggingRef = useRef(false);
+  const activePointerId = useRef(null);
+  const startYRef = useRef(0);
+  const startIndexRef = useRef(0);
+  const orderRef = useRef(order);
+  orderRef.current = order;
+
+  // Re-sync whenever cards actually change (added/deleted/edited) —
+  // this never fires mid-drag since persist() isn't called until drop.
+  useEffect(() => {
+    setOrder(cards.map(c => c.id));
+  }, [cards]);
+
+  const handlePointerDown = (id) => (e) => {
+    draggingRef.current = true;
+    activePointerId.current = e.pointerId;
+    startYRef.current = e.clientY;
+    startIndexRef.current = orderRef.current.indexOf(id);
+    setDragId(id);
+    setDragY(0);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  };
+
+  const handlePointerMove = (id) => (e) => {
+    if (!draggingRef.current || e.pointerId !== activePointerId.current) return;
+    const delta = e.clientY - startYRef.current;
+    setDragY(delta);
+    const rowEl = rowRefs.current[id];
+    const rowH = (rowEl?.offsetHeight || 70) + ROW_GAP;
+    const steps = Math.round(delta / rowH);
+    const newIndex = Math.max(0, Math.min(orderRef.current.length - 1, startIndexRef.current + steps));
+    const from = orderRef.current.indexOf(id);
+    if (from !== -1 && from !== newIndex) {
+      const next = [...orderRef.current];
+      next.splice(from, 1);
+      next.splice(newIndex, 0, id);
+      setOrder(next);
+    }
+  };
+
+  const endDrag = () => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    activePointerId.current = null;
+    setDragId(null);
+    setDragY(0);
+    onReorder(orderRef.current);
+  };
+
+  const handlePointerUp = (id) => (e) => {
+    if (e.pointerId !== activePointerId.current) return;
+    endDrag();
+  };
+  const handlePointerCancel = (id) => () => endDrag();
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: ROW_GAP }}>
+      {order.map(id => {
+        const c = cardsById[id];
+        if (!c) return null;
+        const dragging = dragId === id;
+        return (
+          <div key={id}
+            ref={el => { if (el) rowRefs.current[id] = el; }}
+            style={{
+              transform: dragging ? `translateY(${dragY}px) scale(1.02)` : "none",
+              zIndex: dragging ? 5 : 1,
+              position: "relative",
+              boxShadow: dragging ? "0 10px 28px rgba(0,0,0,.25)" : "none",
+              borderRadius: 12,
+              transition: dragging ? "none" : "box-shadow .15s ease",
+            }}>
+            <CardRow theme={theme} card={c}
+              onUpdate={(patch) => onUpdateCard(id, patch)}
+              onDelete={() => onDeleteCard(id)}
+              dragHandleProps={{
+                onPointerDown: handlePointerDown(id),
+                onPointerMove: handlePointerMove(id),
+                onPointerUp: handlePointerUp(id),
+                onPointerCancel: handlePointerCancel(id),
+              }} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CardRow({ theme, card, onUpdate, onDelete, dragHandleProps }) {
   const isBlank = !card.front.trim() && !card.back.trim();
   const [editing, setEditing] = useState(isBlank);
   const [front, setFront] = useState(card.front);
@@ -929,25 +1027,13 @@ function CardRow({ theme, card, onUpdate, onDelete, onMoveUp, onMoveDown }) {
       border: isBlank ? `1.5px dashed ${theme.borderStrong}` : `1px solid ${theme.border}`,
       borderRadius: 12, padding: 12, display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap"
     }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0, alignSelf: "stretch", justifyContent: "center" }}>
-        <button onClick={onMoveUp} disabled={!onMoveUp} title="Move card up" className="iconbtn"
-          style={{
-            background: "none", border: `1px solid ${theme.border}`, borderRadius: 8, width: 28, height: 28,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: onMoveUp ? theme.textFaint : theme.border, cursor: onMoveUp ? "pointer" : "default",
-            opacity: onMoveUp ? 1 : 0.4, touchAction: "manipulation"
-          }}>
-          <ChevronUp size={15} />
-        </button>
-        <button onClick={onMoveDown} disabled={!onMoveDown} title="Move card down" className="iconbtn"
-          style={{
-            background: "none", border: `1px solid ${theme.border}`, borderRadius: 8, width: 28, height: 28,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: onMoveDown ? theme.textFaint : theme.border, cursor: onMoveDown ? "pointer" : "default",
-            opacity: onMoveDown ? 1 : 0.4, touchAction: "manipulation"
-          }}>
-          <ChevronDown size={15} />
-        </button>
+      <div {...dragHandleProps} title="Drag to reorder"
+        style={{
+          display: "flex", alignSelf: "stretch", alignItems: "center", justifyContent: "center",
+          width: 26, flexShrink: 0, color: theme.textFaint, cursor: "grab",
+          touchAction: "none", userSelect: "none", WebkitUserSelect: "none",
+        }}>
+        <GripVertical size={16} />
       </div>
       <div style={{ width: 6, alignSelf: "stretch", borderRadius: 4, background: card.color, minHeight: 40, transition: "background-color .3s ease" }} />
       {editing ? (
