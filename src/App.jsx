@@ -924,12 +924,8 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
 
   const cardsById = useMemo(() => Object.fromEntries(cards.map(c => [c.id, c])), [cards]);
   const rowRefs = useRef({});
-  const draggingRef = useRef(false);       // true once a press has turned into an active drag
-  const pendingIdRef = useRef(null);       // card id of a press that might become a drag
-  const pressTimerRef = useRef(null);
-  const pressElRef = useRef(null);
+  const draggingRef = useRef(false);
   const activePointerId = useRef(null);
-  const startXRef = useRef(0);
   const startYRef = useRef(0);
   const startIndexRef = useRef(0);
   const orderRef = useRef(order);
@@ -941,48 +937,24 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
     setOrder(cards.map(c => c.id));
   }, [cards]);
 
-  useEffect(() => () => clearTimeout(pressTimerRef.current), []);
-
-  const PRESS_DELAY = 160;   // ms to hold still before a tap becomes a drag
-  const MOVE_TOLERANCE = 8;  // px of wiggle allowed during that hold
-
-  // Tap-and-hold, then drag: a plain touch/scroll is left completely alone
-  // (nothing is prevented) until the hold confirms this is a drag — only
-  // then do we take over the pointer and start moving the card.
+  // Picked up as soon as you press down on a card (outside its buttons) and
+  // tracked purely through refs (not React state) so a fast drag can never
+  // race a pending re-render — the touch-action on the row below is what
+  // keeps the browser from also trying to scroll the page at the same time.
   const handlePointerDown = (id) => (e) => {
-    if (draggingRef.current) return;
-    pendingIdRef.current = id;
+    draggingRef.current = true;
     activePointerId.current = e.pointerId;
-    pressElRef.current = e.currentTarget;
-    startXRef.current = e.clientX;
     startYRef.current = e.clientY;
     startIndexRef.current = orderRef.current.indexOf(id);
-    clearTimeout(pressTimerRef.current);
-    pressTimerRef.current = setTimeout(() => {
-      if (pendingIdRef.current !== id || activePointerId.current !== e.pointerId) return;
-      draggingRef.current = true;
-      try { pressElRef.current?.setPointerCapture(e.pointerId); } catch {}
-      setDragId(id);
-      setDragY(0);
-    }, PRESS_DELAY);
+    setDragId(id);
+    setDragY(0);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
   };
 
   const handlePointerMove = (id) => (e) => {
-    if (e.pointerId !== activePointerId.current) return;
-    const dx = e.clientX - startXRef.current;
-    const dy = e.clientY - startYRef.current;
-
-    if (!draggingRef.current) {
-      // still deciding — if it moved before the hold confirmed, it's a
-      // scroll or a swipe elsewhere in the app, not a reorder
-      if (Math.abs(dx) > MOVE_TOLERANCE || Math.abs(dy) > MOVE_TOLERANCE) {
-        clearTimeout(pressTimerRef.current);
-        pendingIdRef.current = null;
-      }
-      return;
-    }
-
+    if (!draggingRef.current || e.pointerId !== activePointerId.current) return;
     e.preventDefault();
+    const dy = e.clientY - startYRef.current;
     setDragY(dy);
     const rowEl = rowRefs.current[id];
     const rowH = (rowEl?.offsetHeight || 70) + ROW_GAP;
@@ -998,8 +970,6 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
   };
 
   const endDrag = () => {
-    clearTimeout(pressTimerRef.current);
-    pendingIdRef.current = null;
     activePointerId.current = null;
     if (!draggingRef.current) return;
     draggingRef.current = false;
@@ -1023,13 +993,14 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
         return (
           <div key={id}
             ref={el => { if (el) rowRefs.current[id] = el; }}
-            style={{
-              transform: dragging ? `translateY(${dragY}px) scale(1.02)` : "none",
-              zIndex: dragging ? 5 : 1,
+            style={dragging ? {
+              transform: `translateY(${dragY}px) scale(1.02)`,
+              zIndex: 5,
               position: "relative",
-              boxShadow: dragging ? "0 10px 28px rgba(0,0,0,.25)" : "none",
+              boxShadow: "0 10px 28px rgba(0,0,0,.25)",
               borderRadius: 12,
-              transition: dragging ? "none" : "box-shadow .15s ease",
+            } : {
+              borderRadius: 12,
             }}>
             <CardRow theme={theme} card={c}
               onUpdate={(patch) => onUpdateCard(id, patch)}
@@ -1077,7 +1048,7 @@ function CardRow({ theme, card, onUpdate, onDelete, dragHandleProps }) {
         border: isBlank ? `1.5px dashed ${theme.borderStrong}` : `1px solid ${theme.border}`,
         borderRadius: 12, padding: 12, display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap",
         cursor: editing ? "default" : "grab",
-        touchAction: editing ? "auto" : "manipulation",
+        touchAction: editing ? "auto" : "pan-x",
         WebkitTouchCallout: "none",
         userSelect: editing ? "auto" : "none",
         WebkitUserSelect: editing ? "auto" : "none",
