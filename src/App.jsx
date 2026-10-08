@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import {
   Folder, Plus, Play, Shuffle, ArrowLeft, Check, X, Edit2, Trash2,
   ChevronLeft, ChevronRight, RotateCw, BookOpen, ListChecks, PenLine,
@@ -921,11 +921,17 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
   const [order, setOrder] = useState(() => cards.map(c => c.id));
   const [dragId, setDragId] = useState(null);
   const [dragY, setDragY] = useState(0);
+  const [settling, setSettling] = useState(false); // true only during the brief drop-back animation
 
   const cardsById = useMemo(() => Object.fromEntries(cards.map(c => [c.id, c])), [cards]);
   const rowRefs = useRef({});
-  const draggingRef = useRef(false);
+  const prevTopsRef = useRef({});
+  const draggingRef = useRef(false);   // true once a hold has turned into an active drag
+  const pendingIdRef = useRef(null);   // card id of a press that might become a drag
+  const pressTimerRef = useRef(null);
+  const pressElRef = useRef(null);
   const activePointerId = useRef(null);
+  const startXRef = useRef(0);
   const startYRef = useRef(0);
   const startIndexRef = useRef(0);
   const orderRef = useRef(order);
@@ -937,22 +943,77 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
     setOrder(cards.map(c => c.id));
   }, [cards]);
 
-  // Picked up as soon as you press down on a card (outside its buttons) and
-  // tracked purely through refs (not React state) so a fast drag can never
-  // race a pending re-render — the touch-action on the row below is what
-  // keeps the browser from also trying to scroll the page at the same time.
+  useEffect(() => () => clearTimeout(pressTimerRef.current), []);
+
+  const PRESS_DELAY = 300;   // ms you must hold still before a touch becomes a drag
+  const MOVE_TOLERANCE = 10; // px of wiggle allowed during that hold before it's treated as a scroll
+  const SETTLE_MS = 160;     // drop-back animation duration
+
+  // FLIP-animate every row that *isn't* being actively dragged whenever the
+  // order changes underneath it, so the other cards glide into their new
+  // spot instead of snapping there instantly.
+  useLayoutEffect(() => {
+    const newTops = {};
+    order.forEach(id => {
+      const el = rowRefs.current[id];
+      if (el) newTops[id] = el.getBoundingClientRect().top;
+    });
+    order.forEach(id => {
+      if (id === dragId) return; // the dragged row already tracks the finger directly
+      const el = rowRefs.current[id];
+      const prevTop = prevTopsRef.current[id];
+      const newTop = newTops[id];
+      if (!el || prevTop == null || newTop == null || prevTop === newTop) return;
+      const delta = prevTop - newTop;
+      el.style.transition = "none";
+      el.style.transform = `translateY(${delta}px)`;
+      el.getBoundingClientRect(); // force reflow before animating to the real spot
+      requestAnimationFrame(() => {
+        el.style.transition = "transform 180ms ease";
+        el.style.transform = "";
+      });
+    });
+    prevTopsRef.current = newTops;
+  }, [order, dragId]);
+
+  // Press-and-hold, then drag: a plain touch/scroll is left completely
+  // alone (nothing is prevented, nothing captured) until the hold confirms
+  // this is a drag — only then do we take over the pointer and start
+  // moving the card, so normal scrolling through the list still works.
   const handlePointerDown = (id) => (e) => {
-    draggingRef.current = true;
+    if (draggingRef.current) return;
+    pendingIdRef.current = id;
     activePointerId.current = e.pointerId;
+    pressElRef.current = e.currentTarget;
+    startXRef.current = e.clientX;
     startYRef.current = e.clientY;
     startIndexRef.current = orderRef.current.indexOf(id);
-    setDragId(id);
-    setDragY(0);
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    clearTimeout(pressTimerRef.current);
+    pressTimerRef.current = setTimeout(() => {
+      if (pendingIdRef.current !== id || activePointerId.current !== e.pointerId) return;
+      draggingRef.current = true;
+      try { pressElRef.current?.setPointerCapture(e.pointerId); } catch {}
+      setSettling(false);
+      setDragId(id);
+      setDragY(0);
+    }, PRESS_DELAY);
   };
 
   const handlePointerMove = (id) => (e) => {
-    if (!draggingRef.current || e.pointerId !== activePointerId.current) return;
+    if (e.pointerId !== activePointerId.current) return;
+
+    if (!draggingRef.current) {
+      // still deciding — if it moves before the hold confirms, treat it as
+      // a scroll (or anything else) and leave it alone completely
+      const dx = e.clientX - startXRef.current;
+      const dy = e.clientY - startYRef.current;
+      if (Math.abs(dx) > MOVE_TOLERANCE || Math.abs(dy) > MOVE_TOLERANCE) {
+        clearTimeout(pressTimerRef.current);
+        pendingIdRef.current = null;
+      }
+      return;
+    }
+
     e.preventDefault();
     const dy = e.clientY - startYRef.current;
     setDragY(dy);
@@ -970,12 +1031,19 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
   };
 
   const endDrag = () => {
+    clearTimeout(pressTimerRef.current);
+    pendingIdRef.current = null;
     activePointerId.current = null;
     if (!draggingRef.current) return;
     draggingRef.current = false;
-    setDragId(null);
+    // animate smoothly back down into its slot, then commit
+    setSettling(true);
     setDragY(0);
-    onReorder(orderRef.current);
+    setTimeout(() => {
+      setDragId(null);
+      setSettling(false);
+      onReorder(orderRef.current);
+    }, SETTLE_MS);
   };
 
   const handlePointerUp = (id) => (e) => {
@@ -994,23 +1062,27 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
           <div key={id}
             ref={el => { if (el) rowRefs.current[id] = el; }}
             style={dragging ? {
-              transform: `translateY(${dragY}px) scale(1.02)`,
-              zIndex: 5,
+              transform: `translateY(${dragY}px)`,
+              transition: settling ? `transform ${SETTLE_MS}ms ease` : "none",
               position: "relative",
-              boxShadow: "0 10px 28px rgba(0,0,0,.25)",
+              zIndex: 5,
+            } : undefined}>
+            <div style={{
+              transform: dragging ? "scale(1.02)" : "scale(1)",
+              boxShadow: dragging ? "0 10px 28px rgba(0,0,0,.25)" : "none",
               borderRadius: 12,
-            } : {
-              borderRadius: 12,
+              transition: "transform 150ms ease, box-shadow 150ms ease",
             }}>
-            <CardRow theme={theme} card={c}
-              onUpdate={(patch) => onUpdateCard(id, patch)}
-              onDelete={() => onDeleteCard(id)}
-              dragHandleProps={{
-                onPointerDown: handlePointerDown(id),
-                onPointerMove: handlePointerMove(id),
-                onPointerUp: handlePointerUp(id),
-                onPointerCancel: handlePointerCancel(id),
-              }} />
+              <CardRow theme={theme} card={c}
+                onUpdate={(patch) => onUpdateCard(id, patch)}
+                onDelete={() => onDeleteCard(id)}
+                dragHandleProps={{
+                  onPointerDown: handlePointerDown(id),
+                  onPointerMove: handlePointerMove(id),
+                  onPointerUp: handlePointerUp(id),
+                  onPointerCancel: handlePointerCancel(id),
+                }} />
+            </div>
           </div>
         );
       })}
@@ -1048,7 +1120,7 @@ function CardRow({ theme, card, onUpdate, onDelete, dragHandleProps }) {
         border: isBlank ? `1.5px dashed ${theme.borderStrong}` : `1px solid ${theme.border}`,
         borderRadius: 12, padding: 12, display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap",
         cursor: editing ? "default" : "grab",
-        touchAction: editing ? "auto" : "pan-x",
+        touchAction: editing ? "auto" : "manipulation",
         WebkitTouchCallout: "none",
         userSelect: editing ? "auto" : "none",
         WebkitUserSelect: editing ? "auto" : "none",
