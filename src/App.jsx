@@ -3,7 +3,7 @@ import {
   Folder, Plus, Play, Shuffle, ArrowLeft, Check, X, Edit2, Trash2,
   ChevronLeft, ChevronRight, RotateCw, BookOpen, ListChecks, PenLine,
   Settings2, FolderPlus, Layers, RefreshCw, Award, ArrowRight, Palette,
-  Sun, Moon, LogOut, Cloud, CloudOff
+  Sun, Moon, LogOut, Cloud, CloudOff, ArrowUpDown
 } from "lucide-react";
 import { supabase } from "./supabase";
 
@@ -828,6 +828,7 @@ function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards
   const [example, setExample] = useState("");
   const [color, setColor] = useState(CARD_COLORS[0].hex);
   const [bulkCount, setBulkCount] = useState(5);
+  const [reorderMode, setReorderMode] = useState(false);
   const frontRef = useRef(null);
 
   const submit = () => {
@@ -899,13 +900,24 @@ function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards
       {set.cards.length === 0 ? (
         <EmptyState theme={theme} icon={PenLine} title="No cards yet" sub="Add a card above, or add a batch of blanks to fill in later." action={null} />
       ) : (
-        <ReorderableCardList
-          theme={theme}
-          cards={set.cards}
-          onUpdateCard={(cardId, patch) => onUpdateCard(set.id, cardId, patch)}
-          onDeleteCard={(cardId) => onDeleteCard(set.id, cardId)}
-          onReorder={(orderedIds) => onReorderCards(set.id, orderedIds)}
-        />
+        <>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 12.5, color: theme.textDim }}>
+              {reorderMode ? "Press and drag any card to move it, then tap Done" : `${set.cards.length} card${set.cards.length === 1 ? "" : "s"}`}
+            </div>
+            <Btn theme={theme} size="sm" variant={reorderMode ? "solid" : "ghost"} color={set.color} onClick={() => setReorderMode(r => !r)}>
+              {reorderMode ? <><Check size={14} /> Done</> : <><ArrowUpDown size={14} /> Reorder</>}
+            </Btn>
+          </div>
+          <ReorderableCardList
+            theme={theme}
+            cards={set.cards}
+            reorderMode={reorderMode}
+            onUpdateCard={(cardId, patch) => onUpdateCard(set.id, cardId, patch)}
+            onDeleteCard={(cardId) => onDeleteCard(set.id, cardId)}
+            onReorder={(orderedIds) => onReorderCards(set.id, orderedIds)}
+          />
+        </>
       )}
     </div>
   );
@@ -917,7 +929,7 @@ function SetEditor({ theme, set, onBack, onUpdateSet, onAddCard, onAddBlankCards
    piece that needs to be React state, since it drives what's rendered. */
 const ROW_GAP = 10;
 
-function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReorder }) {
+function ReorderableCardList({ theme, cards, reorderMode, onUpdateCard, onDeleteCard, onReorder }) {
   const [order, setOrder] = useState(() => cards.map(c => c.id));
   const [dragId, setDragId] = useState(null);
   const [dragY, setDragY] = useState(0);
@@ -926,12 +938,8 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
   const cardsById = useMemo(() => Object.fromEntries(cards.map(c => [c.id, c])), [cards]);
   const rowRefs = useRef({});
   const prevTopsRef = useRef({});
-  const draggingRef = useRef(false);   // true once a hold has turned into an active drag
-  const pendingIdRef = useRef(null);   // card id of a press that might become a drag
-  const pressTimerRef = useRef(null);
-  const pressElRef = useRef(null);
+  const draggingRef = useRef(false);
   const activePointerId = useRef(null);
-  const startXRef = useRef(0);
   const startYRef = useRef(0);
   const startIndexRef = useRef(0);
   const orderRef = useRef(order);
@@ -943,11 +951,7 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
     setOrder(cards.map(c => c.id));
   }, [cards]);
 
-  useEffect(() => () => clearTimeout(pressTimerRef.current), []);
-
-  const PRESS_DELAY = 300;   // ms you must hold still before a touch becomes a drag
-  const MOVE_TOLERANCE = 10; // px of wiggle allowed during that hold before it's treated as a scroll
-  const SETTLE_MS = 160;     // drop-back animation duration
+  const SETTLE_MS = 160; // drop-back animation duration
 
   // FLIP-animate every row that *isn't* being actively dragged whenever the
   // order changes underneath it, so the other cards glide into their new
@@ -976,44 +980,24 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
     prevTopsRef.current = newTops;
   }, [order, dragId]);
 
-  // Press-and-hold, then drag: a plain touch/scroll is left completely
-  // alone (nothing is prevented, nothing captured) until the hold confirms
-  // this is a drag — only then do we take over the pointer and start
-  // moving the card, so normal scrolling through the list still works.
+  // Reorder mode is an explicit toggle (see the "Reorder" button above the
+  // list), so there's no competing native scroll to referee here — a press
+  // picks the card up immediately and tracks the finger 1:1, all decision
+  // state in refs so a fast drag can never race a pending re-render.
   const handlePointerDown = (id) => (e) => {
-    if (draggingRef.current) return;
-    pendingIdRef.current = id;
+    if (!reorderMode) return;
+    draggingRef.current = true;
     activePointerId.current = e.pointerId;
-    pressElRef.current = e.currentTarget;
-    startXRef.current = e.clientX;
     startYRef.current = e.clientY;
     startIndexRef.current = orderRef.current.indexOf(id);
-    clearTimeout(pressTimerRef.current);
-    pressTimerRef.current = setTimeout(() => {
-      if (pendingIdRef.current !== id || activePointerId.current !== e.pointerId) return;
-      draggingRef.current = true;
-      try { pressElRef.current?.setPointerCapture(e.pointerId); } catch {}
-      setSettling(false);
-      setDragId(id);
-      setDragY(0);
-    }, PRESS_DELAY);
+    setSettling(false);
+    setDragId(id);
+    setDragY(0);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
   };
 
   const handlePointerMove = (id) => (e) => {
-    if (e.pointerId !== activePointerId.current) return;
-
-    if (!draggingRef.current) {
-      // still deciding — if it moves before the hold confirms, treat it as
-      // a scroll (or anything else) and leave it alone completely
-      const dx = e.clientX - startXRef.current;
-      const dy = e.clientY - startYRef.current;
-      if (Math.abs(dx) > MOVE_TOLERANCE || Math.abs(dy) > MOVE_TOLERANCE) {
-        clearTimeout(pressTimerRef.current);
-        pendingIdRef.current = null;
-      }
-      return;
-    }
-
+    if (!draggingRef.current || e.pointerId !== activePointerId.current) return;
     e.preventDefault();
     const dy = e.clientY - startYRef.current;
     setDragY(dy);
@@ -1031,8 +1015,6 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
   };
 
   const endDrag = () => {
-    clearTimeout(pressTimerRef.current);
-    pendingIdRef.current = null;
     activePointerId.current = null;
     if (!draggingRef.current) return;
     draggingRef.current = false;
@@ -1073,7 +1055,7 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
               borderRadius: 12,
               transition: "transform 150ms ease, box-shadow 150ms ease",
             }}>
-              <CardRow theme={theme} card={c}
+              <CardRow theme={theme} card={c} reorderMode={reorderMode}
                 onUpdate={(patch) => onUpdateCard(id, patch)}
                 onDelete={() => onDeleteCard(id)}
                 dragHandleProps={{
@@ -1090,7 +1072,7 @@ function ReorderableCardList({ theme, cards, onUpdateCard, onDeleteCard, onReord
   );
 }
 
-function CardRow({ theme, card, onUpdate, onDelete, dragHandleProps }) {
+function CardRow({ theme, card, onUpdate, onDelete, reorderMode, dragHandleProps }) {
   const isBlank = !card.front.trim() && !card.back.trim();
   const [editing, setEditing] = useState(isBlank);
   const [front, setFront] = useState(card.front);
@@ -1099,34 +1081,31 @@ function CardRow({ theme, card, onUpdate, onDelete, dragHandleProps }) {
 
   const save = () => { onUpdate({ front, back, example }); setEditing(false); };
 
-  // Tap the card itself and drag — but never hijack a tap/press that
-  // landed on a real control (an input, a button, the color picker),
-  // and never while the card is open for editing.
-  const guardedDown = (e) => {
-    if (editing) return;
-    if (e.target.closest("button, input, textarea, [data-no-drag]")) return;
-    dragHandleProps.onPointerDown(e);
-  };
+  // While reorder mode is on, the whole card is a drag target and nothing
+  // else is interactive — otherwise the card behaves exactly as before.
+  const showEditor = editing && !reorderMode;
 
   return (
     <div
       className="hoverlift"
-      onPointerDown={guardedDown}
-      onPointerMove={dragHandleProps.onPointerMove}
-      onPointerUp={dragHandleProps.onPointerUp}
-      onPointerCancel={dragHandleProps.onPointerCancel}
+      {...(reorderMode ? {
+        onPointerDown: dragHandleProps.onPointerDown,
+        onPointerMove: dragHandleProps.onPointerMove,
+        onPointerUp: dragHandleProps.onPointerUp,
+        onPointerCancel: dragHandleProps.onPointerCancel,
+      } : {})}
       style={{
         background: isBlank ? theme.surfaceAlt : theme.surface,
         border: isBlank ? `1.5px dashed ${theme.borderStrong}` : `1px solid ${theme.border}`,
         borderRadius: 12, padding: 12, display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap",
-        cursor: editing ? "default" : "grab",
-        touchAction: editing ? "auto" : "manipulation",
+        cursor: reorderMode ? "grab" : "default",
+        touchAction: reorderMode ? "none" : "auto",
         WebkitTouchCallout: "none",
-        userSelect: editing ? "auto" : "none",
-        WebkitUserSelect: editing ? "auto" : "none",
+        userSelect: reorderMode ? "none" : "auto",
+        WebkitUserSelect: reorderMode ? "none" : "auto",
       }}>
       <div style={{ width: 6, alignSelf: "stretch", borderRadius: 4, background: card.color, minHeight: 40, transition: "background-color .3s ease" }} />
-      {editing ? (
+      {showEditor ? (
         <div style={{ flex: "1 1 220px", minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
             <input value={front} onChange={e => setFront(e.target.value)} placeholder="Term / front"
@@ -1153,24 +1132,26 @@ function CardRow({ theme, card, onUpdate, onDelete, dragHandleProps }) {
           )}
         </div>
       )}
-      <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center", marginLeft: "auto" }}>
-        <ColorDotPicker value={card.color} onChange={(hex) => onUpdate({ color: hex })} />
-        {editing ? (
-          <button onClick={save} className="iconbtn" title="Save card"
-            style={{ background: theme.correctBg, border: `1px solid ${theme.correctBorder}`, borderRadius: 8, color: theme.correctText, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Check size={16} />
-          </button>
-        ) : (
-          <button onClick={() => setEditing(true)} className="iconbtn" title="Edit card"
+      {!reorderMode && (
+        <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center", marginLeft: "auto" }}>
+          <ColorDotPicker value={card.color} onChange={(hex) => onUpdate({ color: hex })} />
+          {editing ? (
+            <button onClick={save} className="iconbtn" title="Save card"
+              style={{ background: theme.correctBg, border: `1px solid ${theme.correctBorder}`, borderRadius: 8, color: theme.correctText, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Check size={16} />
+            </button>
+          ) : (
+            <button onClick={() => setEditing(true)} className="iconbtn" title="Edit card"
+              style={{ background: "none", border: `1px solid ${theme.border}`, borderRadius: 8, color: theme.textFaint, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Edit2 size={14} />
+            </button>
+          )}
+          <button onClick={onDelete} className="iconbtn" title="Delete card"
             style={{ background: "none", border: `1px solid ${theme.border}`, borderRadius: 8, color: theme.textFaint, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Edit2 size={14} />
+            <Trash2 size={14} />
           </button>
-        )}
-        <button onClick={onDelete} className="iconbtn" title="Delete card"
-          style={{ background: "none", border: `1px solid ${theme.border}`, borderRadius: 8, color: theme.textFaint, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <Trash2 size={14} />
-        </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
