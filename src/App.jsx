@@ -951,7 +951,9 @@ function ReorderableCardList({ theme, cards, reorderMode, onUpdateCard, onDelete
     setOrder(cards.map(c => c.id));
   }, [cards]);
 
-  const SETTLE_MS = 160; // drop-back animation duration
+  const SETTLE_MS = 240;     // drop-back animation duration
+  const SWAP_MS = 260;       // how long another card takes to glide out of the way
+  const EASE = "cubic-bezier(0.16,1,0.3,1)"; // same gentle ease used elsewhere in the app
 
   // FLIP-animate every row that *isn't* being actively dragged whenever the
   // order changes underneath it, so the other cards glide into their new
@@ -973,7 +975,7 @@ function ReorderableCardList({ theme, cards, reorderMode, onUpdateCard, onDelete
       el.style.transform = `translateY(${delta}px)`;
       el.getBoundingClientRect(); // force reflow before animating to the real spot
       requestAnimationFrame(() => {
-        el.style.transition = "transform 180ms ease";
+        el.style.transition = `transform ${SWAP_MS}ms ${EASE}`;
         el.style.transform = "";
       });
     });
@@ -1045,7 +1047,10 @@ function ReorderableCardList({ theme, cards, reorderMode, onUpdateCard, onDelete
             ref={el => { if (el) rowRefs.current[id] = el; }}
             style={dragging ? {
               transform: `translateY(${dragY}px)`,
-              transition: settling ? `transform ${SETTLE_MS}ms ease` : "none",
+              // a touch of smoothing while actively tracking the finger (so
+              // quick, low-sample-rate touch input doesn't look jittery),
+              // then a slower, gentler ease for the drop into place
+              transition: settling ? `transform ${SETTLE_MS}ms ${EASE}` : "transform 45ms linear",
               position: "relative",
               zIndex: 5,
             } : undefined}>
@@ -1056,7 +1061,7 @@ function ReorderableCardList({ theme, cards, reorderMode, onUpdateCard, onDelete
               // card, so non-dragging rows must have no transform property
               ...(dragging ? { transform: "scale(1.02)", boxShadow: "0 10px 28px rgba(0,0,0,.25)" } : { boxShadow: "none" }),
               borderRadius: 12,
-              transition: "transform 150ms ease, box-shadow 150ms ease",
+              transition: `transform 200ms ${EASE}, box-shadow 200ms ${EASE}`,
             }}>
               <CardRow theme={theme} card={c} reorderMode={reorderMode}
                 onUpdate={(patch) => onUpdateCard(id, patch)}
