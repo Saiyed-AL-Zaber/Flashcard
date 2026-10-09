@@ -1050,8 +1050,11 @@ function ReorderableCardList({ theme, cards, reorderMode, onUpdateCard, onDelete
               zIndex: 5,
             } : undefined}>
             <div style={{
-              transform: dragging ? "scale(1.02)" : "scale(1)",
-              boxShadow: dragging ? "0 10px 28px rgba(0,0,0,.25)" : "none",
+              // only set a transform AT ALL while actually dragging — even
+              // "scale(1)" creates a CSS stacking context that would trap
+              // the color-picker popover (z-index: 20) underneath the next
+              // card, so non-dragging rows must have no transform property
+              ...(dragging ? { transform: "scale(1.02)", boxShadow: "0 10px 28px rgba(0,0,0,.25)" } : { boxShadow: "none" }),
               borderRadius: 12,
               transition: "transform 150ms ease, box-shadow 150ms ease",
             }}>
